@@ -1,0 +1,32 @@
+Step-by-Step Plan Notes
+====================
+
+This is a working notes file I'm maintaining as I go through the code.
+
+`_01_core.py` – Defines the core types used project-wide: `StatementRejected`, `QueryFailed`, `ModelError` exception classes; `ForeignKey` NamedTuple for key edges; `Result`, `Timing`, `Plan`, `Reply`, `Verdict` dataclasses for representing statement outcomes, timing, execution plans, model responses, and verdict states. Every other module imports from this file, so it forms the shared type foundation the entire pipeline depends on.
+
+`_02_dialects.py` – Engine adapter module supporting Postgres, MySQL, and DuckDB. Defines `BaseEngine` with `check_statement()`, `close()`, `commit()`, `rollback()`, and `measure()` methods, plus concrete `Postgres`, `MySQL`, and `DuckDB` subclasses that implement engine-specific SQL generation, query execution via `psycopg2`/`pymysql`/`duckdb`, `EXPLAIN` parsing, and catalog query templates. The `REGISTRY` dict and `get_dialect()` function map engine names to their concrete classes, enabling the pipeline to work with different database backends.
+
+`_03_catalog.py` – Defines the `Catalog` dataclass holding database metadata (columns, keys, indexes, row counts, foreign keys) and provides methods for rendering schema prompts, computing table ordering for sampling, and parsing SQL. Contains `tables_in()` to extract referenced tables from a query, `short_type()` to normalize type names across engines, and `from_rows()`/`from_dump()`/`from_mapping()` to build `Catalog` instances from various data sources; also defines utility regexes and type-naming constants used throughout the pipeline.
+
+`_04_sampling.py` – Implements sampling-based equivalence checking: builds a reduced-copy of the database schema at a user-specified percent, then verifies a candidate rewrite returns the same rows on that sample; exports `build_sample()` which creates the sample schema, `sample_predicate_sql()` which rewrites query table references into the sample schema, and `SampleStats`/`SampleStats` to describe the sample's state; was non-functional until `execute()` was added to the engine contract in `_02_dialects.py`.
+
+`_05_equivalence.py` – Implements the `compare()` function that runs two statements on the sample database and returns an `Equivalence` outcome (`equal`, `different`, or `unknown` if results exceed the row limit); also defines `_normalise()` for normalizing comparison values with a tolerance parameter and `multiset()` for comparing rows as order-insensitive multisets with float quantization.
+
+`_06_llm.py` – The model layer module defining `ChatModel` (abstract base), `OllamaModel` (talks to local Ollama server), `EchoModel` (returns the input query unchanged), `parse_model()` to instantiate a backend from a `provider/model` spec, and `available_models()`, `extract_sql()`, `strip_fences()`, and `ladder()` helper functions; the `require_sql` parameter I added lets the plan turn complete when the model only produces reasoning without SQL.
+
+`_07_prompts.py` – Contains the prompt text used throughout the pipeline: `CONTRACT` (the model contracting rules), `PLAN` (plan-then-write planning prompt), `WRITE` (write the rewritten query), and `REPAIR` (fix a rejected rewrite); also defines `DIVERSITY` tactics the model can be prompted to use for different rewrite approaches.
+
+`_08_verify.py` – Contains the static and structural verification gates a candidate rewrite must pass before being considered valid: `static_problems()` checks the SQL is readable, the model only uses named tables/columns from the catalog, and qualification succeeds; `structural_problems()` checks for correlation, window function pitfalls, `NOT EXISTS` vs `NOT IN` swaps, `DISTINCT`/`ORDER BY`/`LIMIT` preservation; `sargability_problems()` flags when an indexed column is wrapped in a cast/function; `check()` runs all gates in order and returns a `Verdict`; `structural_problems()` and `sargability_problems()` were previously returning values that `check()` discarded, making all gates inert.
+
+`_09_strategies.py` – Defines the prompt strategy classes (`ExistingStrategy`, `ZeroShotStrategy`, `OneShotStrategy`, `StructuredReasoningStrategy`) and a `get_strategy()` factory; each strategy implements `system_prompt()`, `plan_prompt()`, `write_prompt()`, and `repair_prompt()` methods that format the prompts sent to the LLM; also contains a `DIVERSITY` tuple of rewrite tactics the model can be prompted to use.
+
+`_10_rewrite.py` – The core rewrite driver: `Rewriter` class that drives the plan-then-write pipeline for a single query, including `schema_block()` (catalog rendering), `plan_rewrite()` (model planning phase), `emit()` (model write phase), `repair()` (model fix phase), and `rewrite()` method that orchestrates generating multiple candidates with diversity tactics; `Candidate` and `RewriteResult` dataclasses hold the outcome of each attempt.
+
+`_11_rank.py` – Implements timing and ranking of candidates: `Measurement` and `QueryRecord` dataclasses, `time_statement()`/`inspect_plan()` functions, `check_equivalence()` to verify a candidate against the original on the sample, and `measure_query()` which verifies each candidate then times the survivors and the original; also defines `render_table()`, `to_json()`, `save_json()`, and `compare_strategies()` for output formatting.
+
+`_12_workloads.py` – Parses workload definition files: reads `workload.json` metadata and `queries.sql` files containing annotated SQL queries (Q01-Q15, J01-J12 format); defines `Workload`, `Query` dataclasses and `load()`, `parse_sql()`, `discover()` functions; the `HEADER` regex extracts query IDs and descriptions from `-- ID: description` comment lines; also contains test fixture data and test cases for the parser.
+
+`_13_cli.py` – The command-line interface entry point: `build_parser()` defines all subcommands (`show`, `catalog`, `verify`, `rewrite`, `compare`), `cmd_show()` renders schema prompts, `cmd_catalog()` dumps catalog as JSON, `cmd_verify()` verifies a candidate against the original, `cmd_rewrite()` runs the full rewrite pipeline, `cmd_compare()` compares strategy results; also contains `render_rewrites()` for formatting output and `main()` as the dispatch function.
+
+`_13_test_CLI.py` – Test module for the CLI; tests the parser, subcommands, and CLI behavior against an in-memory DuckDB database; contains test fixtures and assertions for each command's output and exit codes.
