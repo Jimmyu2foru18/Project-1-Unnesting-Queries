@@ -278,6 +278,7 @@ def from_dump(dump_path, schema: str = "public") -> Catalog:
             for column, referenced in zip(child_cols, parent_cols_clean):
                 catalog.foreign_keys.append(ForeignKey(table, column, parent, referenced))
 
+    catalog.foreign_keys = list(dict.fromkeys(catalog.foreign_keys))
     for key in catalog.foreign_keys:
         catalog.indexed.setdefault(key.child_table, set()).add(key.child_column)
     for table, columns in catalog.primary.items():
