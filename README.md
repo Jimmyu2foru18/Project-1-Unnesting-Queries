@@ -97,12 +97,3 @@ WHERE (SELECT avg(r.rating) FROM ratings r WHERE r.movie_id = m.id) > 8.0;
   "hints": "prefer pre-aggregation over a correlated subquery"
 }
 ```
-
-Bundled workloads:
-- `workloads/imdb_nested` -- Q01-Q15, nested subqueries
-- `workloads/imdb_join` -- J01-J12, joins and aggregation
-
-## Limitations
-
-- Sampling checks correctness on a subset. Use `--no-sample` for full data comparison.
-- Speedups are wall-clock on one machine. Compare within a run, not across runs.
