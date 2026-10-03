@@ -5,10 +5,6 @@ the driving one, which key each join uses, what has to be filtered before it is
 joined, and what must stay true about the answer. The second asks for the SQL
 with that analysis in hand. Splitting them keeps expensive deliberation on the
 part that benefits from it and keeps the emitted statement short and stable.
-
-The unnesting rules below are guidance for one family of queries, the
-correlated-subquery workload. They are attached only when a workload asks for
-them; everything else in this file is general.
 """
 
 CONTRACT = """\
@@ -48,48 +44,9 @@ Correctness contract:
   them unnecessary.
 """
 
-UNNESTING = """\
-Correlated subqueries are the workload here. Removing the correlation is the
-whole point, and the pattern decides the replacement.
-
-scalar correlated aggregate (AVG/MAX/MIN/SUM/COUNT)
-  Pre-aggregate in a CTE grouped by the correlation key, then equi-join on that
-  key. An outer row whose key has no matching group must drop out, which is what
-  the subquery's NULL already does. Do not add an outer join and do not
-  substitute 0.
-
-EXISTS
-  Join to a DISTINCT set of the correlation key. A semi-join, so no duplicates.
-
-NOT EXISTS
-  LEFT JOIN that DISTINCT set and keep rows where the key is NULL. An anti-join.
-  Never rewrite NOT EXISTS as NOT IN.
-
-IN
-  Join to a DISTINCT set of matching keys.
-
-NOT IN
-  Use the anti-join above. If the source filters NULLs out of the subquery, keep
-  that filter, because NOT IN is never true for a NULL.
-
-count of peers beating a threshold ("more than N rows", "not in the top N")
-  Use COUNT(*) OVER (PARTITION BY key). Not DENSE_RANK: it counts distinct
-  values, not rows, so ties rank differently from the original.
-
-nested EXISTS
-  Compose one semi-join per level, keeping the middle query's correlation key in
-  the join condition.
-
-Every CTE must yield at most one row per join key. A window function or an
-extra join that emits two rows for a key will duplicate that key's outer rows.
-"""
-
-SYSTEM = CONTRACT
-
-
 def system_for(hints: str = "") -> str:
     """The system prompt, plus workload guidance when the workload supplies it."""
-    return f"{CONTRACT}\n{hints.strip()}\n" if hints.strip() else SYSTEM
+    return f"{CONTRACT}\n{hints.strip()}\n" if hints.strip() else CONTRACT
 
 
 PLAN = """\

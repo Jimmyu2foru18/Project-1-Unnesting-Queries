@@ -83,7 +83,7 @@ def test_building_the_sample_twice_replaces_it(conn):
 
 
 def test_an_unsamplable_table_is_skipped_not_fatal(conn):
-    catalog = from_mapping(
+    from_mapping(
         {**CATALOG.columns, "gone": {"id": "INT"}},
     )
     stats = build_sample(DIALECT, conn, CATALOG, percent=10.0)

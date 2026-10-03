@@ -10,7 +10,6 @@ is set, so a key cannot end up in a terminal scrollback or a log.
 """
 import argparse
 import os
-import sys
 from pathlib import Path
 
 DIR = Path(__file__).resolve().parent.parent

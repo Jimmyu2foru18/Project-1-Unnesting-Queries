@@ -39,11 +39,10 @@ def present(module: str) -> bool:
 
 
 def report() -> list[tuple[str, bool, str]]:
-    return [(pkg, present(mod), why) for mod, (pkg, why) in REQUIRED.items()]
+    return [(pkg, present(mod), why) for mod, (pkg, why) in REQUIREMENTS.items()]
 
 
 def install(packages: list[str]) -> None:
-    requirement_file = DIR / "requirements.txt"
     print(f"installing: pip install {' '.join(packages)}")
     subprocess.check_call([sys.executable, "-m", "pip", "install", *packages])
 

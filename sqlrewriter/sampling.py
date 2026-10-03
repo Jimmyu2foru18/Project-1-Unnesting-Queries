@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import sqlglot
 from sqlglot import exp
 
-from sqlrewriter.catalog import Catalog, ForeignKey
+from sqlrewriter.catalog import Catalog
 from sqlrewriter.dialects import Dialect
 
 SAMPLE_SCHEMA = "sqlrw_sample"
@@ -150,61 +150,9 @@ def sample_predicate_sql(dialect: Dialect, sql: str, catalog: Catalog, sample_sc
     return tree.sql(dialect=dialect.sqlglot, pretty=True)
 
 
-def sample_table_names(catalog: Catalog, stats: SampleStats) -> list[str]:
-    """Tables present in the sample."""
-    return [t for t, n in stats.tables.items() if n]
-
-
-def summarize(stats: SampleStats) -> str:
-    return stats.describe()
-
-
-def edge_hint(catalog: Catalog, table: str) -> str:
-    """A short description of how a table relates to the rest of the schema."""
-    parents = catalog.parents_of(table)
-    children = catalog.children_of(table)
-    bits = []
-    if parents:
-        bits.append("child of " + ", ".join(sorted(k.parent for k in parents)))
-    if children:
-        bits.append("parent of " + ", ".join(sorted(k.child for k in children)))
-    return "; ".join(bits) or "no foreign keys"
-
-
-def has_cycles(catalog: Catalog) -> list[str]:
-    """Tables involved in a foreign-key cycle, which a sample cannot fully satisfy."""
-    state: dict[str, int] = {}
-    cycles: set[str] = set()
-
-    def visit(table: str, trail: list[str]) -> None:
-        if state.get(table) == 2:
-            return
-        if state.get(table) == 1:
-            if table in trail:
-                cycles.update(trail[trail.index(table):])
-            return
-        state[table] = 1
-        for key in catalog.parents_of(table):
-            if key.parent_table in catalog.columns:
-                visit(key.parent_table, trail + [table])
-        state[table] = 2
-
-    for table in catalog.tables:
-        visit(table, [])
-    return sorted(cycles)
-
-
-def unused_foreign_key_hint(key: ForeignKey) -> str:
-    return f"{key.child} references {key.parent}"
-
-
 __all__ = [
     "SAMPLE_SCHEMA",
     "SampleStats",
     "build_sample",
-    "edge_hint",
-    "has_cycles",
     "sample_predicate_sql",
-    "sample_table_names",
-    "summarize",
 ]

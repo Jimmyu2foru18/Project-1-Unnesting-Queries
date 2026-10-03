@@ -2,7 +2,6 @@
 import pytest
 
 from sqlrewriter.dialects import (
-    Dialect,
     StatementRejected,
     get_dialect,
     open_database,

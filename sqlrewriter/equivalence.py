@@ -72,17 +72,6 @@ def multiset(rows: list[tuple], tolerance: float = DEFAULT_TOLERANCE) -> Counter
     return Counter(tuple(_normalise(v, tolerance) for v in row) for row in rows)
 
 
-def close_enough(left: Any, right: Any, tolerance: float) -> bool:
-    """Whether two values agree within a relative tolerance."""
-    try:
-        a, b = float(left), float(right)
-    except (TypeError, ValueError):
-        return left == right
-    if math.isnan(a) and math.isnan(b):
-        return True
-    return math.isclose(a, b, rel_tol=tolerance, abs_tol=tolerance)
-
-
 def compare(
     dialect: Dialect,
     conn,

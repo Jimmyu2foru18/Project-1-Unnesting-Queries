@@ -205,7 +205,6 @@ def static_problems(sql: str, dialect: Dialect, catalog: Catalog) -> list[str]:
     if tree is None:
         return problems
 
-    import sqlglot
     from sqlglot.optimizer.qualify import qualify
 
     referenced = {t.name for t in tree.find_all(exp.Table)} - {

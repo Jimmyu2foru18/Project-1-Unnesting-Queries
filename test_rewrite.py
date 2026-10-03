@@ -1,5 +1,4 @@
 """Candidate generation, driven by a scripted model so no provider is needed."""
-import pytest
 
 from sqlrewriter import prompts
 from sqlrewriter.catalog import from_mapping

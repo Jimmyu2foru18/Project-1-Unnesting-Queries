@@ -120,9 +120,9 @@ def test_a_candidate_that_is_wrong_does_not_become_the_best(conn):
 
 
 def test_a_candidate_slower_than_the_original_is_kept_and_ranked(conn):
-    padded = candidate("SELECT m.title FROM movies m JOIN ratings r ON r.movie_id = m.id "
-                       "GROUP BY m.id, m.title, r.votes0 FROM ratings r2 "
-                       "JOIN (SELECT * FROM ratings) r ON r.movie_id = m.id LIMIT 1", "silly")
+    candidate("SELECT m.title FROM movies m JOIN ratings r ON r.movie_id = m.id "
+              "GROUP BY m.id, m.title, r.votes0 FROM ratings r2 "
+              "JOIN (SELECT * FROM ratings) r ON r.movie_id = m.id LIMIT 1", "silly")
     report = measure_query(DIALECT, conn, result(candidate(FASTER, "join")), CATALOG, runs=2)
     assert report.ranked, "a correct candidate is never dropped for being slow"
 
@@ -139,7 +139,7 @@ SLOW = "SELECT sum(range) FROM range(20000000)"
 class Stubbed(type(DIALECT)):
     """A DuckDB dialect that reports chosen timings, so budgets are testable."""
 
-    __slots__ = ("timings", "calls")
+    __slots__ = ("calls", "timings")
 
     def __init__(self, timings):
         self.timings = timings

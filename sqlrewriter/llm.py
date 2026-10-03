@@ -72,12 +72,10 @@ class ChatModel:
     def chat(self, system: str, user: str, *, effort: str = DEFAULT_EFFORT,
              temperature: float = 0.0, budget: int = 4096) -> Reply:
         """Return the final answer, downshifting effort while the answer is empty."""
-        last: Reply | None = None
         for level in ladder(effort):
             reply = self._once(system, user, level, temperature, budget)
             if reply.sql:
                 return reply
-            last = reply
         raise ModelError(f"{self.name} returned no answer in the final channel at any effort")
 
     def _once(self, system, user, effort, temperature, budget) -> Reply:
