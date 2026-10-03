@@ -1,15 +1,4 @@
-"""The command line interface.
-
-    python -m sqlrewriter show   --engine duckdb --dsn data/imdb.duckdb --schema main
-    python -m sqlrewriter rewrite --engine postgres --dsn postgresql://... \\
-                                 --model ollama/gpt-oss:20b --workload workloads/imdb_nested
-    python -m sqlrewriter compare benchmarks/results/*.json
-
-``rewrite`` runs the full experiment: sample the data, generate candidates,
-check them against the sample, time the survivors, and rank them. ``show``
-prints the schema block sent to the model, which is the quickest way to check
-that introspection is working.
-"""
+"""The command line interface."""
 import argparse
 import json
 import os
@@ -17,19 +6,22 @@ import sys
 import time
 from pathlib import Path
 
-from sqlrewriter import catalog as catalog_mod
-from sqlrewriter import rank, sampling, workloads
-from sqlrewriter.dialects import get_dialect
-from sqlrewriter.llm import parse_model
-from sqlrewriter.rewrite import Rewriter
-from sqlrewriter.strategies import get_strategy
+from _02_dialects import get_dialect
+from _03_catalog import from_dump, introspect as catalog_introspect
+from _04_sampling import build_sample, SAMPLE_SCHEMA
+from _06_llm import parse_model
+from _09_strategies import get_strategy
+from _10_rewrite import Rewriter
+from _11_rank import compare_strategies, measure_query, render_table, save_json
+from _12_workloads import load as load_workload, discover
 
-DIR = Path(__file__).resolve().parent.parent
+DIR = Path(__file__).resolve().parent
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="sqlrewriter", description=__doc__,
+        prog="sqlrewriter",
+        description="LLM-assisted SQL query rewriting.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -57,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     rewrite.add_argument("--runs", type=int, default=5, help="timing runs per statement")
     rewrite.add_argument("--sample-percent", type=float, default=1.0)
     rewrite.add_argument("--sample-max-rows", type=int, default=200_000)
-    rewrite.add_argument("--sample-schema", default=sampling.SAMPLE_SCHEMA)
+    rewrite.add_argument("--sample-schema", default=SAMPLE_SCHEMA)
     rewrite.add_argument("--no-sample", action="store_true", help="skip sampling and check on the full data")
     rewrite.add_argument("--compare-limit", type=int, default=200_000)
     rewrite.add_argument("--baseline-budget-ms", type=float, default=0.0,
@@ -96,16 +88,16 @@ def _connect(args):
 
 def cmd_show(args) -> int:
     if args.dump:
-        cat = catalog_mod.from_dump(args.dump)
+        cat = from_dump(args.dump)
         schema = args.schema or cat.schema
     else:
         dialect, conn = _connect(args)
         schema = _resolve_schema(args, dialect)
-        cat = catalog_mod.introspect(dialect, conn, schema)
+        cat = catalog_introspect(dialect, conn, schema)
         dialect.close(conn)
 
     if args.workload:
-        for query in workloads.load(args.workload):
+        for query in load_workload(args.workload):
             print(f"===== {query.qid}: {query.description}")
             print(cat.render(query.sql, dialect.sqlglot, args.budget))
             print()
@@ -119,7 +111,7 @@ def cmd_show(args) -> int:
 def cmd_catalog(args) -> int:
     dialect, conn = _connect(args)
     schema = _resolve_schema(args, dialect)
-    cat = catalog_mod.introspect(dialect, conn, schema)
+    cat = catalog_introspect(dialect, conn, schema)
     dialect.close(conn)
     print(json.dumps({
         "schema": cat.schema,
@@ -134,15 +126,15 @@ def cmd_catalog(args) -> int:
 
 
 def cmd_verify(args) -> int:
-    from sqlrewriter.equivalence import compare
+    from _05_equivalence import compare
 
     dialect, conn = _connect(args)
     schema = _resolve_schema(args, dialect)
-    cat = catalog_mod.introspect(dialect, conn, schema)
+    cat = catalog_introspect(dialect, conn, schema)
     target = None
     if args.sample:
         print("building sample...", flush=True)
-        stats = sampling.build_sample(dialect, conn, cat, percent=1.0)
+        stats = build_sample(dialect, conn, cat, percent=1.0)
         print(f"sample: {stats.describe()}")
         target = stats.schema
     outcome = compare(dialect, conn, args.original, args.candidate,
@@ -153,7 +145,7 @@ def cmd_verify(args) -> int:
 
 
 def cmd_rewrite(args) -> int:
-    workload = workloads.load(args.workload)
+    workload = load_workload(args.workload)
     if args.only:
         workload = workload.only(args.only.split(","))
     if args.limit:
@@ -170,14 +162,14 @@ def cmd_rewrite(args) -> int:
         sys.exit("Error: pass --dsn or set dsn in workload.json")
 
     conn = dialect.connect(dsn)
-    cat = catalog_mod.introspect(dialect, conn, schema)
+    cat = catalog_introspect(dialect, conn, schema)
     print(f"engine {dialect.name} | schema {schema} | {len(cat.columns)} tables | workload {workload.name} | strategy {args.strategy}")
 
     sample_schema = None
     if not args.no_sample:
         print(f"building a {args.sample_percent:g}% sample...", flush=True)
         started = time.perf_counter()
-        stats = sampling.build_sample(
+        stats = build_sample(
             dialect, conn, cat,
             percent=args.sample_percent, max_rows=args.sample_max_rows, schema=args.sample_schema,
         )
@@ -202,10 +194,10 @@ def cmd_rewrite(args) -> int:
         result = rewriter.rewrite(query.qid, query.description, query.sql)
         if result.error:
             print(f"  {result.error}")
-            reports.append(rank.QueryReport(query.qid, query.description, query.sql, error=result.error, strategy=result.strategy))
+            reports.append(QueryReport(query.qid, query.description, query.sql, error=result.error, strategy=result.strategy))
             continue
         print(f"  {len(result.accepted)}/{len(result.candidates)} candidates passed the static gates")
-        report = rank.measure_query(
+        report = measure_query(
             dialect, conn, result, cat,
             runs=args.runs, sample_schema=sample_schema,
             compare_limit=args.compare_limit, time_limit_ms=args.baseline_budget_ms,
@@ -222,9 +214,9 @@ def cmd_rewrite(args) -> int:
         reports.append(report)
 
     dialect.close(conn)
-    print("\n" + rank.render_table(reports))
+    print("\n" + render_table(reports))
     if args.out:
-        path = rank.save_json(reports, args.out)
+        path = save_json(reports, args.out)
         print(f"report written to {path}")
     if not args.no_write:
         target = DIR / "workloads" / workload.name / "rewrites.sql"
@@ -236,22 +228,25 @@ def cmd_rewrite(args) -> int:
 
 def render_rewrites(reports) -> str:
     """Write the best verified rewrite for each query in the workload's SQL shape."""
-    lines = ["-- Verified rewrites: the fastest candidate that matched the original on the sample.", ""]
+    lines = ["-- Verified rewrites"]
     for report in reports:
+        base = report.baseline.median_ms if report.baseline and report.baseline.ok else None
         best = report.best
-        if best is None or best.equivalent is False:
-            lines.append(f"-- {report.qid} FAILED: no verified candidate\n")
-            continue
-        lines.append(f"-- {report.qid} (rewrite): {report.description}")
-        lines.append(f"-- {best.median_ms:.1f}ms vs {report.baseline.median_ms:.1f}ms original"
-                     if report.baseline and report.baseline.ok else "")
-        lines.append(best.sql + ";")
+        lines.append(f"-- {report.qid}: {report.description}")
+        if report.error:
+            lines.append(f"-- {report.qid} FAILED: {report.error}")
+        elif best is None:
+            lines.append(f"-- {report.qid} FAILED: no candidates")
+        else:
+            if base:
+                lines.append(f"-- original: {base:,.1f}ms | rewritten: {best.median_ms:,.1f}ms | speedup: {best.speedup:.2f}x")
+            lines.append(best.sql + ";")
         lines.append("")
     return "\n".join(line for line in lines if line is not None)
 
 
 def cmd_compare(args) -> int:
-    print(rank.compare_strategies(args.files))
+    print(compare_strategies(args.files))
     return 0
 
 

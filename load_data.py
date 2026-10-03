@@ -2,14 +2,9 @@
 
     python scripts/load_data.py --dump imdb.7z --engine duckdb --out data/imdb.duckdb
 
-DuckDB is the default target because it needs no server: the dump is fed
-straight into an embedded database, which makes a reproducible run a single
-command. The same dump loads into MySQL and PostgreSQL with the server's own
-client, and ``--emit-sql`` writes a cleaned file for either.
-
-Only the statements that belong to MySQL's session handling are dropped. The
-schema, the keys and the foreign keys are kept, because the catalog the model
-sees is built from them.
+DuckDB is the default target because it requires no server. The same dump loads
+into MySQL and PostgreSQL with their respective clients, and --emit-sql writes
+a cleaned file for either.
 """
 import argparse
 import os
@@ -23,7 +18,6 @@ from pathlib import Path
 DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(DIR))
 
-# Session bookkeeping that no other engine understands.
 MYSQL_ONLY = re.compile(
     r"^\s*(?:DROP\s+DATABASE|CREATE\s+DATABASE|USE\s+|SET\s+|START\s+TRANSACTION|"
     r"BEGIN;|COMMIT;|ROLLBACK;|LOCK\s+TABLES|UNLOCK\s+TABLES|\(\d+\)\s*ENGINE|"
@@ -34,7 +28,6 @@ SEVEN_ZIP = r"C:\Program Files\7-Zip\7z.exe"
 
 
 def resolve_dump(source: Path) -> Path:
-    """Return a readable .sql path, extracting an archive first if needed."""
     if source.suffix.lower() == ".7z":
         target = Path(tempfile.gettempdir()) / "sqlrw_imdb_dump"
         target.mkdir(parents=True, exist_ok=True)
@@ -62,7 +55,6 @@ def _on_path(name: str) -> bool:
 
 
 def clean_dump(lines: list[str]) -> list[str]:
-    """Drop statements that only a MySQL session understands."""
     return [line for line in lines if not MYSQL_ONLY.match(line)]
 
 
@@ -70,12 +62,6 @@ INSERT_INTO = re.compile(r"^(\s*)INSERT\s+INTO\s+", re.IGNORECASE)
 
 
 def split_statements(lines: list[str], ignore_duplicates: bool = True) -> tuple[list[str], dict[str, list[str]]]:
-    """Separate the DDL from the inserts, grouping the inserts by table.
-
-    Inserts become ``INSERT OR IGNORE`` because the dump contains duplicate
-    primary keys. Handling that in the statement rather than in a per-row retry
-    keeps a multi-million row load to a handful of batches.
-    """
     ddl: list[str] = []
     inserts: dict[str, list[str]] = {}
     for line in lines:
@@ -91,17 +77,7 @@ def split_statements(lines: list[str], ignore_duplicates: bool = True) -> tuple[
     return ddl, inserts
 
 
-def _has_inserts(lines: list[str]) -> bool:
-    return any(line.strip().upper().startswith("INSERT") for line in lines)
-
-
 def load_order(ddl: list[str], inserts: dict[str, list[str]]) -> list[str]:
-    """Tables with parents before children, so foreign keys hold while loading.
-
-    The dump inserts `people` after `stars`, which only works because MySQL's
-    FOREIGN_KEY_CHECKS was off. Loading in dependency order removes the need for
-    that, so the loaded database is genuinely consistent.
-    """
     blocks = re.findall(
         r"CREATE\s+TABLE\s+(\w+)\s*\((.*?)\)\s*;", "\n".join(ddl), re.IGNORECASE | re.DOTALL
     )
@@ -128,11 +104,10 @@ def load_order(ddl: list[str], inserts: dict[str, list[str]]) -> list[str]:
 
 
 def _run_group(conn, group: list[str], strict: bool) -> tuple[int, list[str]]:
-    """Execute a batch, then isolate any statement that fails. Returns (duplicates, failures)."""
     try:
         conn.execute("\n".join(group))
         return 0, []
-    except Exception:  # noqa: BLE001 - narrow down to the offending statement
+    except Exception:
         if strict:
             raise
     duplicates, failures = 0, []
@@ -141,7 +116,7 @@ def _run_group(conn, group: list[str], strict: bool) -> tuple[int, list[str]]:
             continue
         try:
             conn.execute(line)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             message = str(err)
             if "Duplicate key" in message or "violates primary key" in message:
                 duplicates += 1
@@ -186,23 +161,16 @@ def load_duckdb(dump: Path, out: Path, indexes: bool, rebuild: bool,
 
     print(f"loaded in {time.perf_counter() - started:.1f}s")
     if duplicates:
-        print(f"skipped {duplicates:,} duplicate primary keys already present in the dump")
+        print(f"skipped {duplicates:,} duplicate primary keys")
     if failures:
         print(f"{len(failures)} statements failed to load:")
         for note in failures[:10]:
             print(f"  {note}")
-        if len(failures) > 10:
-            print(f"  ... and {len(failures) - 10} more")
 
     for table, count in conn.execute(
         "select table_name, estimated_size from duckdb_tables() order by table_name"
     ).fetchall():
         print(f"  {table:<12} {count:>12,} rows loaded")
-
-    for table, count in conn.execute(
-        "select table_name, estimated_size from duckdb_tables() order by table_name"
-    ).fetchall():
-        print(f"  {table:<12} {count:>12,}")
 
     if indexes:
         started = time.perf_counter()
@@ -217,7 +185,7 @@ def load_duckdb(dump: Path, out: Path, indexes: bool, rebuild: bool,
                     f'create index if not exists "idx_{table}_{column}" '
                     f'on "{table}" ("{column}")'
                 )
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 print(f"  skipped {table}.{column}: {str(err)[:60]}")
         print(f"indexes built in {time.perf_counter() - started:.1f}s")
 
@@ -226,12 +194,7 @@ def load_duckdb(dump: Path, out: Path, indexes: bool, rebuild: bool,
     print(f"wrote {out}")
 
 
-def _has_inserts(lines: list[str]) -> bool:
-    return any(line.strip().upper().startswith("INSERT") for line in lines)
-
-
 def emit_sql(dump: Path, out: Path) -> None:
-    """Write a cleaned .sql file for MySQL or PostgreSQL to load."""
     print(f"reading {dump}")
     kept = clean_dump(dump.read_text(encoding="utf-8", errors="replace").splitlines())
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -244,10 +207,8 @@ def emit_sql(dump: Path, out: Path) -> None:
 
 
 def load_server(engine: str, dump: Path) -> None:
-    """Load the dump into a running MySQL or PostgreSQL server."""
     if engine == "mysql":
         import pymysql
-
         from urllib.parse import unquote, urlparse
 
         parsed = urlparse(os.getenv("SQLRW_DSN", ""))
@@ -270,10 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dump", default="imdb.7z", help="dataset archive or .sql dump")
     parser.add_argument("--engine", default="duckdb", choices=["duckdb", "mysql", "postgres"])
     parser.add_argument("--out", default="data/imdb.duckdb", help="database file for duckdb, or .sql for --emit-sql")
-    parser.add_argument("--indexes", action="store_true", help="also build indexes on foreign key columns")
-    parser.add_argument("--rebuild", action="store_true", help="reload even if the output exists")
+    parser.add_argument("--indexes", action="store_true", help="build indexes on foreign key columns")
+    parser.add_argument("--rebuild", action="store_true", help="reload even if output exists")
     parser.add_argument("--batch", type=int, default=2000, help="inserts per batch")
-    parser.add_argument("--strict", action="store_true", help="fail on the first bad statement")
+    parser.add_argument("--strict", action="store_true", help="fail on first bad statement")
     parser.add_argument("--emit-sql", default="", help="write a cleaned .sql for MySQL or PostgreSQL and stop")
     args = parser.parse_args(argv)
 

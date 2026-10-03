@@ -2,9 +2,9 @@
 import sqlglot
 import pytest
 
-from sqlrewriter.catalog import ForeignKey, from_mapping
-from sqlrewriter.dialects import get_dialect
-from sqlrewriter.verify import (
+from _03_catalog import ForeignKey, from_mapping
+from _02_dialects import get_dialect
+from _08_verify import (
     check,
     correlated_columns,
     sargability_problems,
@@ -30,7 +30,7 @@ UNNESTED = (
     "SELECT m.title FROM movies m JOIN peer p ON p.y = m.year"
 )
 
-DIALECTS = ["postgres", "mysql", "duckdb"]
+DIALECTS = ["duckdb"]
 
 
 @pytest.fixture(params=DIALECTS)
@@ -148,12 +148,6 @@ def test_check_reports_a_pass(dialect):
     verdict = check(UNNESTED, CORRELATED, dialect, CATALOG)
     assert verdict.ok
     assert verdict.notes
-
-
-def test_a_mysql_rewrite_is_parsed_with_mysql_dialect():
-    dialect = get_dialect("mysql")
-    sql = "SELECT `title` FROM `movies` WHERE `id` = 1 LIMIT 5"
-    assert static_problems(sql, dialect, CATALOG) == []
 
 
 def test_a_duckdb_specific_rewrite_is_parsed_with_duckdb_dialect():

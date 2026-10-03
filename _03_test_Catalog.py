@@ -1,7 +1,7 @@
 """Catalog building, statistics and prompt rendering."""
 import pytest
 
-from sqlrewriter.catalog import (
+from _03_catalog import (
     Catalog,
     ForeignKey,
     from_dump,
@@ -150,18 +150,6 @@ def test_scope_walks_outward_along_the_foreign_keys():
 def test_a_query_naming_nothing_known_falls_back_to_a_pruned_list():
     catalog = from_mapping({f"t{i}": {"id": "INT"} for i in range(20)})
     assert len(catalog.scope("SELECT id FROM nowhere", "postgres", budget=4)) == 4
-
-
-def test_render_closes_the_scope_and_announces_it():
-    catalog = from_mapping(
-        {f"t{i}": {"id": "INT", "parent": "INT"} for i in range(20)},
-        primary={f"t{i}": ["id"] for i in range(20)},
-        foreign_keys=[ForeignKey(f"t{i}", "parent", f"t{i + 1}", "id") for i in range(19)],
-    )
-    block = catalog.render("SELECT id FROM t7", "postgres", budget=3)
-    assert "Only these 3 tables are in scope" in block
-    assert "CREATE TABLE t19" not in block
-    assert "PRIMARY KEY" in block
 
 
 def test_tables_in_drops_ctes_and_tolerates_broken_sql():

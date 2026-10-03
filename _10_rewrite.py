@@ -1,20 +1,14 @@
-"""Generate and check candidate rewrites for one query.
+"""Generate and check candidate rewrites for one query."""
 
-For each query, the model first looks at how the query works and then generates
-several possible rewrites. We generate multiple rewrites because some may be
-valid but perform differently.
-
-Every candidate is checked before it runs. A rejected candidate is repaired with
-the specific validation errors attached, rather than asking the model to start over.
-"""
 import time
 from dataclasses import dataclass, field
 
-from sqlrewriter import prompts, verify
-from sqlrewriter.catalog import Catalog
-from sqlrewriter.dialects import Dialect
-from sqlrewriter.llm import ChatModel, ModelError, Reply
-from sqlrewriter.strategies import ExistingStrategy, PromptStrategy
+from _02_dialects import DuckDB
+from _03_catalog import Catalog
+from _06_llm import ChatModel, ModelError, Reply
+from _07_prompts import DIVERSITY
+from _08_verify import Verdict, check
+from _09_strategies import ExistingStrategy, PromptStrategy
 
 
 @dataclass
@@ -26,7 +20,7 @@ class Candidate:
     plan: str = ""
     reasoning: str = ""
     attempts: int = 1
-    verdict: verify.Verdict = field(default_factory=verify.Verdict)
+    verdict: Verdict = field(default_factory=Verdict)
     equivalence: object | None = None
     strategy: str = ""
     generation_time_ms: float = 0.0
@@ -64,7 +58,7 @@ class Rewriter:
     def __init__(
         self,
         model: ChatModel,
-        dialect: Dialect,
+        dialect: DuckDB,
         catalog: Catalog,
         strategy: PromptStrategy | None = None,
         *,
@@ -93,14 +87,12 @@ class Rewriter:
         return self.catalog.render(sql, self.dialect.sqlglot, self.schema_budget)
 
     def plan_rewrite(self, original_sql: str) -> Reply:
-        """The analysis turn: no SQL, only the shape of the better query."""
         prompt = self.strategy.plan_prompt(self.schema_block(original_sql), original_sql, self.dialect.name)
         if prompt is None:
             return Reply("", "", self.model.name, self.plan_effort)
         return self.model.chat(self.system, prompt, effort=self.plan_effort, budget=8192)
 
     def emit(self, original_sql: str, plan: str, variant: str = "") -> Reply:
-        """One candidate, from the plan or along a named alternative route."""
         schema = self.schema_block(original_sql)
         if variant:
             user = self.strategy.variant_prompt(schema, original_sql, self.dialect.name, variant)
@@ -115,18 +107,17 @@ class Rewriter:
         return self.model.chat(self.system, user, effort=self.repair_effort, budget=8192)
 
     def rewrite(self, qid: str, description: str, original_sql: str) -> RewriteResult:
-        """Produce and check every candidate for one query."""
         result = RewriteResult(qid=qid, description=description, original_sql=original_sql, strategy=self.strategy.name)
         try:
             analysis = self.plan_rewrite(original_sql)
-        except ModelError as err:
+        except RuntimeError as err:
             result.error = f"planning failed: {err}"
             return result
         result.plan = _text(analysis)
 
         seen: set[str] = set()
         routes = [("", "plan")] + [
-            (prompts.DIVERSITY[(i + len(qid)) % len(prompts.DIVERSITY)], f"variant-{i}")
+            (DIVERSITY[(i + len(qid)) % len(DIVERSITY)], f"variant-{i}")
             for i in range(self.variants - 1)
         ]
         for variant, label in routes:
@@ -138,7 +129,6 @@ class Rewriter:
     def _attempt(
         self, original_sql: str, plan: str, variant: str, label: str, seen: set[str]
     ) -> Candidate | None:
-        """Emit one candidate and repair it until the gates accept it."""
         problems: list[str] = []
         rejected = ""
         generation_time_ms = 0.0
@@ -149,7 +139,7 @@ class Rewriter:
             generation_time_ms += (time.perf_counter() - started) * 1000.0
             total_tokens += reply.tokens
         except ModelError as err:
-            return Candidate(sql="", label=label, plan=plan, verdict=verify.Verdict(
+            return Candidate(sql="", label=label, plan=plan, verdict=Verdict(
                 False, [f"generation failed: {err}"]), strategy=self.strategy.name,
                 generation_time_ms=generation_time_ms, tokens=total_tokens)
 
@@ -160,7 +150,7 @@ class Rewriter:
             elif sql in seen:
                 problems, rejected = ["this is a duplicate of a candidate already tried"], sql
             else:
-                verdict = verify.check(sql, original_sql, self.dialect, self.catalog)
+                verdict = check(sql, original_sql, self.dialect, self.catalog)
                 if verdict.ok:
                     seen.add(sql)
                     return Candidate(sql, label, plan, reply.reasoning, attempt, verdict,
@@ -180,14 +170,9 @@ class Rewriter:
                 problems = [f"repair failed: {err}"]
                 break
         return Candidate(rejected, label, plan, reply.reasoning, self.attempts,
-                         verify.Verdict(False, problems), strategy=self.strategy.name,
+                         Verdict(False, problems), strategy=self.strategy.name,
                          generation_time_ms=generation_time_ms, tokens=total_tokens)
 
 
 def _text(reply: Reply) -> str:
-    """The plan: the final message when there is one, otherwise the reasoning.
-
-    A high-effort plan turn can end inside the reasoning channel when it hits its
-    budget. That text is still a plan, so it is used rather than discarded.
-    """
     return reply.sql.strip() or reply.reasoning.strip()

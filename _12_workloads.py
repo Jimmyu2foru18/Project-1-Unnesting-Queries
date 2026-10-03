@@ -1,21 +1,10 @@
-"""Workloads: sets of queries to rewrite.
+"""Workloads: sets of queries to rewrite."""
 
-A workload is a directory holding a ``queries.sql`` file and an optional
-``workload.json``. The SQL file uses ``-- Q01: description`` headers, the same
-shape the annotated SQL in this project already used, so an existing query set
-becomes a workload by moving it into a folder and adding one small file.
-
-``workload.json`` carries the two things a query set cannot express: the
-database it is meant to run against, and extra guidance for the model.
-"""
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# A header is an id that starts with letters and contains a digit, so ids like
-# Q01 or J01 are recognised while ordinary annotation lines such as
-# "-- Type: correlated subquery" are treated as part of the statement.
 HEADER = re.compile(r"^--\s*([A-Za-z]+[0-9][A-Za-z0-9_]*)\s*:\s*(.*)$")
 FENCE = re.compile(r"^\s*```(?:sql)?\s*|\s*```\s*$", re.IGNORECASE)
 
@@ -66,18 +55,13 @@ class Workload:
 
 
 def _clean_body(lines: list[str]) -> str:
-    """Join statement lines, dropping comment-only metadata.
-
-    Workload files annotate each query with extra comment lines describing its
-    type and complexity. That text belongs in the description, not in the
-    statement, and leaving it in bloats the prompt and the reports.
-    """
+    """Join statement lines, dropping comment-only metadata."""
     body = "\n".join(line for line in lines if not line.strip().startswith("--"))
     return FENCE.sub("", body).strip().rstrip(";").strip()
 
 
 def parse_sql(text: str) -> list[Query]:
-    """Read ``-- Q01: description`` annotated statements out of a SQL file."""
+    """Read -- Q01: description annotated statements out of a SQL file."""
     queries: list[Query] = []
     qid: str | None = None
     description = ""
@@ -98,8 +82,6 @@ def parse_sql(text: str) -> list[Query]:
             continue
         if qid:
             lines.append(line)
-            # A comment line can end in a semicolon, so only a real statement
-            # line terminates the block.
             if line.strip().endswith(";") and not line.strip().startswith("--"):
                 flush()
                 qid, description, lines = None, "", []
@@ -108,7 +90,7 @@ def parse_sql(text: str) -> list[Query]:
 
 
 def load(path: str | Path) -> Workload:
-    """Load a workload from a directory or a bare ``.sql`` file."""
+    """Load a workload from a directory or a bare .sql file."""
     given = Path(path)
     directory = given if given.is_dir() else given.parent
     sql_file = given / "queries.sql" if given.is_dir() else given

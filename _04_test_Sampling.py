@@ -2,10 +2,10 @@
 import duckdb
 import pytest
 
-from sqlrewriter.catalog import ForeignKey, from_mapping
-from sqlrewriter.dialects import get_dialect
-from sqlrewriter.equivalence import compare, multiset
-from sqlrewriter.sampling import SAMPLE_SCHEMA, build_sample, sample_predicate_sql
+from _02_dialects import get_dialect
+from _03_catalog import ForeignKey, from_mapping
+from _04_sampling import SAMPLE_SCHEMA, build_sample, sample_predicate_sql
+from _05_equivalence import compare, multiset
 
 DIALECT = get_dialect("duckdb")
 
@@ -83,11 +83,14 @@ def test_building_the_sample_twice_replaces_it(conn):
 
 
 def test_an_unsamplable_table_is_skipped_not_fatal(conn):
-    from_mapping(
+    bad_catalog = from_mapping(
         {**CATALOG.columns, "gone": {"id": "INT"}},
+        schema="main",
+        rows={**CATALOG.rows, "gone": 10},
     )
-    stats = build_sample(DIALECT, conn, CATALOG, percent=10.0)
+    stats = build_sample(DIALECT, conn, bad_catalog, percent=10.0)
     assert "gone" not in stats.tables
+    assert "gone" in stats.errors
 
 
 def test_sample_predicate_sql_retargets_only_real_tables():

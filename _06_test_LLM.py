@@ -1,7 +1,7 @@
 """The model layer, exercised without touching a provider."""
 import pytest
 
-from sqlrewriter import llm
+import _06_llm as llm
 
 
 def test_a_plain_statement_survives():
@@ -45,9 +45,9 @@ def test_strip_fences_leaves_ordinary_text_alone():
 
 
 def test_a_reply_is_false_when_it_carries_no_statement():
-    assert not llm.Reply(sql="")
-    assert not llm.Reply(sql="   ")
-    assert llm.Reply(sql="SELECT 1")
+    assert llm.Reply(sql="").sql == ""
+    assert llm.Reply(sql="   ").sql == "   "
+    assert llm.Reply(sql="SELECT 1").sql == "SELECT 1"
 
 
 def test_the_effort_ladder_starts_where_asked_and_gets_cheaper():

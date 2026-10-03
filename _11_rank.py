@@ -1,14 +1,5 @@
-"""Timing candidates and ranking them.
+"""Timing candidates and ranking them."""
 
-We use wall-clock time, median of several runs, because that is what a user
-actually waits for and it is available on all supported engines. Query plans
-are inspected afterwards for the two things timing cannot show: a node that is
-rescanned, and a sequential scan on a large table that has an index.
-
-The original query is timed the same way on the same connection, so speedups
-are like-for-like. A correct rewrite that is slower than the original is kept
-and ranked last -- sometimes the database was already doing a good job.
-"""
 import json
 import statistics
 from collections import defaultdict
@@ -16,10 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlrewriter.catalog import Catalog
-from sqlrewriter.dialects import Dialect, Timing
-from sqlrewriter.equivalence import Equivalence
-from sqlrewriter.rewrite import Candidate, RewriteResult
+from _03_catalog import Catalog
+from _01_core import Timing
+from _02_dialects import DuckDB
+from _05_equivalence import Equivalence
+from _10_rewrite import Candidate, RewriteResult
 
 SEQSCAN_ROWS = 50_000
 
@@ -47,7 +39,6 @@ class Measurement:
 
     @property
     def rankable(self) -> bool:
-        """Correct enough to rank: provably equal, or not checked against a sample."""
         return self.ok and self.equivalent is not False
 
 
@@ -76,17 +67,17 @@ class QueryReport:
 
 
 def time_statement(
-    dialect: Dialect, conn, sql: str, label: str, runs: int = 5, strategy: str = ""
+    dialect: DuckDB, conn, sql: str, label: str, runs: int = 5, strategy: str = ""
 ) -> Measurement:
     timing: Timing = dialect.measure(conn, sql, runs)
     return Measurement(label, sql, timing.median_ms, timing.runs, error=timing.error, strategy=strategy)
 
 
-def inspect_plan(dialect: Dialect, conn, sql: str, catalog: Catalog, measurement: Measurement) -> None:
+def inspect_plan(dialect: DuckDB, conn, sql: str, catalog: Catalog, measurement: Measurement) -> None:
     """Fill in loop counts and suspicious scans from the plan, if available."""
     try:
         plan = dialect.explain(conn, sql)
-    except Exception:  # noqa: BLE001 - a plan is a bonus, not a requirement
+    except Exception:
         return
     measurement.max_loops = plan.max_loops
     measurement.seq_scans = [
@@ -97,7 +88,7 @@ def inspect_plan(dialect: Dialect, conn, sql: str, catalog: Catalog, measurement
 
 
 def check_equivalence(
-    dialect: Dialect,
+    dialect: DuckDB,
     conn,
     candidate: Candidate,
     original_sql: str,
@@ -107,7 +98,7 @@ def check_equivalence(
     limit: int = 200_000,
 ) -> Equivalence | None:
     """Run the candidate against the original, on the sample when there is one."""
-    from sqlrewriter.equivalence import compare
+    from _05_equivalence import compare
 
     if not candidate.accepted or not candidate.sql:
         return None
@@ -118,7 +109,7 @@ def check_equivalence(
 
 
 def measure_query(
-    dialect: Dialect,
+    dialect: DuckDB,
     conn,
     result: RewriteResult,
     catalog: Catalog,
@@ -128,13 +119,7 @@ def measure_query(
     compare_limit: int = 200_000,
     time_limit_ms: float | None = None,
 ) -> QueryReport:
-    """Verify every accepted candidate, then time the survivors and the original.
-
-    ``time_limit_ms`` is a budget on the original. It is probed with a single run
-    first: a query that turns out to take an hour does not need to be timed five
-    more times, and its speedup is simply unknown. Zero or ``None`` means no
-    budget, and the original is timed like any other statement.
-    """
+    """Verify every accepted candidate, then time the survivors and the original."""
     report = QueryReport(result.qid, result.description, result.original_sql, plan=result.plan, strategy=result.strategy)
     if result.error:
         report.error = result.error

@@ -1,11 +1,4 @@
-"""Prompts for query rewriting.
-
-Two turns rather than one. The first asks only for analysis: which relation is
-the driving one, which key each join uses, what has to be filtered before it is
-joined, and what must stay true about the answer. The second asks for the SQL
-with that analysis in hand. Splitting them keeps expensive deliberation on the
-part that benefits from it and keeps the emitted statement short and stable.
-"""
+"""Prompts for query rewriting."""
 
 CONTRACT = """\
 You rewrite a SQL query so it runs faster and returns exactly the same rows.
@@ -44,9 +37,11 @@ Correctness contract:
   them unnecessary.
 """
 
+
 def system_for(hints: str = "") -> str:
     """The system prompt, plus workload guidance when the workload supplies it."""
-    return f"{CONTRACT}\n{hints.strip()}\n" if hints.strip() else CONTRACT
+    cleaned = hints.strip()
+    return f"{CONTRACT}\n{cleaned}\n" if cleaned else CONTRACT
 
 
 PLAN = """\

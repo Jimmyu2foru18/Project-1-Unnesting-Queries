@@ -1,25 +1,11 @@
-"""Deciding whether a rewrite returns the same rows as the original.
-
-Both statements are run against the sampled copy and their results compared as
-multisets, so a candidate that drops rows, duplicates them or changes a value is
-caught regardless of what the model said about it. Row order is ignored, because
-a rewrite that reorders without reordering the ORDER BY is not a different
-answer. Floats are compared with a tolerance, because two runs of the same
-aggregate can differ in the last bits depending on how the work is split.
-
-Three outcomes are possible and they are kept apart on purpose: equal,
-different, and unknown. "Unknown" means the check could not be run at all, for
-instance because the result was too large to hold, and it must not be reported
-to a caller as agreement.
-"""
+"""Deciding whether a rewrite returns the same rows as the original."""
 import math
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlrewriter.catalog import Catalog
-from sqlrewriter.dialects import Dialect
-from sqlrewriter.sampling import sample_predicate_sql
+from _03_catalog import Catalog
+from _04_sampling import sample_predicate_sql
 
 DEFAULT_LIMIT = 200_000
 DEFAULT_TOLERANCE = 1e-9
@@ -56,8 +42,6 @@ def _normalise(value: Any, tolerance: float) -> Any:
         return round(value, 9) if math.isfinite(value) else value
     if isinstance(value, (list, tuple)):
         return tuple(_normalise(v, tolerance) for v in value)
-    if isinstance(value, (int,)):
-        return value
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -68,13 +52,13 @@ def _normalise(value: Any, tolerance: float) -> Any:
 
 
 def multiset(rows: list[tuple], tolerance: float = DEFAULT_TOLERANCE) -> Counter:
-    """Rows as an order-insensitive multiset with floats quantised."""
+    """Rows as an order insensitive multiset with floats quantised."""
     return Counter(tuple(_normalise(v, tolerance) for v in row) for row in rows)
 
 
 def compare(
-    dialect: Dialect,
-    conn,
+    dialect: Any,
+    conn: Any,
     original_sql: str,
     candidate_sql: str,
     *,
@@ -83,11 +67,7 @@ def compare(
     limit: int = DEFAULT_LIMIT,
     tolerance: float = DEFAULT_TOLERANCE,
 ) -> Equivalence:
-    """Run both statements and compare their results.
-
-    When ``schema`` is given, both statements are pointed at that schema first,
-    which is how the sampled copy is used.
-    """
+    """Run both statements and compare their results."""
     left_sql = original_sql
     right_sql = candidate_sql
     if schema is not None:
@@ -98,11 +78,11 @@ def compare(
 
     try:
         left = dialect.fetch(conn, left_sql, limit)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return Equivalence(False, f"the original did not run on the sample: {_short(err)}")
     try:
         right = dialect.fetch(conn, right_sql, limit)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return Equivalence(False, f"the candidate did not run on the sample: {_short(err)}")
 
     if left.truncated or right.truncated:
@@ -115,8 +95,7 @@ def compare(
     if len(left.columns) != len(right.columns):
         return Equivalence(
             False,
-            f"the candidate returns {len(right.columns)} columns, the original returns "
-            f"{len(left.columns)}",
+            f"the candidate returns {len(right.columns)} columns, the original returns {len(left.columns)}",
             columns=len(right.columns),
         )
 
@@ -125,10 +104,14 @@ def compare(
     if left_set == right_set:
         return Equivalence(True, rows=left_set.total(), columns=len(left.columns))
 
-    missing = list((left_set - right_set).elements())[:3]
-    extra = list((right_set - left_set).elements())[:3]
-    parts = [f"{len(list((left_set - right_set).elements()))} rows missing, "
-             f"{len(list((right_set - left_set).elements()))} rows unexpected"]
+    missing_diff = left_set - right_set
+    extra_diff = right_set - left_set
+    missing_elements = list(missing_diff.elements())
+    extra_elements = list(extra_diff.elements())
+    missing = missing_elements[:3]
+    extra = extra_elements[:3]
+
+    parts = [f"{len(missing_elements)} rows missing, {len(extra_elements)} rows unexpected"]
     if missing:
         parts.append(f"only the original returns {missing}")
     if extra:

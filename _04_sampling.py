@@ -1,25 +1,11 @@
-"""A sampled copy of the data, used to check that a rewrite is still correct.
-
-Checking a rewrite by running it against the real table is not an option: the
-original may take minutes, and both statements may produce more rows than fit in
-memory. So correctness is judged on a small copy instead, and only a candidate
-that survives there is allowed anywhere near the full table.
-
-The sample is built to keep its foreign keys valid. Tables are visited in
-dependency order, and a child table is not only sampled but also restricted to
-the parents that were actually sampled. Without that restriction a sample is
-full of dangling references, joins collapse to nothing, and a rewrite that
-doubles every row can look correct because both queries return zero rows.
-
-The sample lives in its own schema, so the original data is never touched.
-"""
+"""A sampled copy of the data, used to check that a rewrite is still correct."""
 from dataclasses import dataclass, field
+from typing import Any
 
 import sqlglot
 from sqlglot import exp
 
-from sqlrewriter.catalog import Catalog
-from sqlrewriter.dialects import Dialect
+from _03_catalog import Catalog
 
 SAMPLE_SCHEMA = "sqlrw_sample"
 
@@ -51,8 +37,8 @@ def _short(err: Exception) -> str:
 
 
 def build_sample(
-    dialect: Dialect,
-    conn,
+    dialect: Any,
+    conn: Any,
     catalog: Catalog,
     *,
     percent: float = 1.0,
@@ -60,12 +46,7 @@ def build_sample(
     schema: str = SAMPLE_SCHEMA,
     drop_existing: bool = True,
 ) -> SampleStats:
-    """Create a sampled copy of ``schema`` in ``schema`` of sample tables.
-
-    Returns the resulting :class:`SampleStats`. Tables that cannot be sampled
-    are skipped rather than failing the run, because a missing sample table only
-    costs coverage on the queries that touch it.
-    """
+    """Create a sampled copy of schema in schema of sample tables."""
     if drop_existing:
         _reset(dialect, conn, schema)
 
@@ -81,29 +62,26 @@ def build_sample(
             if predicate:
                 sql += f" WHERE {predicate}"
             sql += f" LIMIT {int(max_rows)}"
-            dialect.run(conn, sql)
+            dialect.execute(conn, sql)
             count = dialect.fetch(
                 conn, f"SELECT count(*) FROM {dialect.ref(schema, table)}", 1
             ).rows
             stats.tables[table] = int(count[0][0]) if count else 0
-        except Exception as err:  # noqa: BLE001 - an unsamplable table is skipped
+        except Exception as err:
             stats.errors[table] = _short(err)
             dialect.rollback(conn)
     dialect.commit(conn)
     return stats
 
 
-def _parent_predicate(dialect: Dialect, catalog: Catalog, table: str, schema: str) -> str:
-    """Require that every sampled foreign key still points at a sampled parent.
-
-    A composite key is matched on all its columns at once, so the predicate
-    mirrors the constraint rather than each column on its own.
-    """
-    clauses = []
+def _parent_predicate(dialect: Any, catalog: Catalog, table: str, schema: str) -> str:
+    """Require that every sampled foreign key still points at a sampled parent."""
     grouped: dict[tuple[str, str], list[str]] = {}
     for key in catalog.parents_of(table):
         if key.parent_table in catalog.columns:
             grouped.setdefault((key.parent_table, key.parent_column), []).append(key.child_column)
+
+    clauses = []
     for (parent, parent_column), children in grouped.items():
         ref = dialect.ref(schema, parent)
         src = dialect.quote("src")
@@ -115,7 +93,7 @@ def _parent_predicate(dialect: Dialect, catalog: Catalog, table: str, schema: st
     return " AND ".join(clauses)
 
 
-def _reset(dialect: Dialect, conn, schema: str) -> None:
+def _reset(dialect: Any, conn: Any, schema: str) -> None:
     """Drop the sample schema if it is already there."""
     quoted = dialect.quote(schema)
     statements = {
@@ -124,22 +102,16 @@ def _reset(dialect: Dialect, conn, schema: str) -> None:
         "mysql": f"DROP DATABASE IF EXISTS {quoted}",
     }
     try:
-        dialect.run(conn, statements[dialect.name])
-    except Exception:  # noqa: BLE001 - a schema that is not there is fine
+        dialect.execute(conn, statements[dialect.name])
+    except Exception:
         dialect.rollback(conn)
-    if dialect.name == "duckdb":
-        dialect.run(conn, f"CREATE SCHEMA IF NOT EXISTS {quoted}")
-    elif dialect.name == "postgres":
-        dialect.run(conn, f"CREATE SCHEMA IF NOT EXISTS {quoted}")
+    if dialect.name in ("duckdb", "postgres"):
+        dialect.execute(conn, f"CREATE SCHEMA IF NOT EXISTS {quoted}")
     dialect.commit(conn)
 
 
-def sample_predicate_sql(dialect: Dialect, sql: str, catalog: Catalog, sample_schema: str) -> str:
-    """Rewrite a query so its tables resolve inside the sample schema.
-
-    Only the schema qualifier changes; nothing about the query's shape is
-    altered, so the candidate and the original are still comparable.
-    """
+def sample_predicate_sql(dialect: Any, sql: str, catalog: Catalog, sample_schema: str) -> str:
+    """Rewrite a query so its tables resolve inside the sample schema."""
     tree = sqlglot.parse_one(sql, dialect=dialect.sqlglot)
     if tree is None:
         return sql

@@ -1,9 +1,0 @@
-{
-  "name": "imdb_join",
-  "engine": "duckdb",
-  "schema": "main",
-  "dsn": "data/imdb.duckdb",
-  "description": "Join-heavy queries over the IMDb schema: joins, aggregations and window functions to speed up.",
-  "tags": ["imdb", "joins", "aggregation"],
-  "hints": "These queries have no correlated subquery to remove. The wins come from aggregating before joining, filtering the large relation before it is joined, and making sure every join uses an indexed key pair.\n\nratings is by far the largest relation in this schema. Group or filter it in its own subquery before joining it to movies.\n\nWhen a query counts rows after joining, decide whether the count is meant to include duplicates. Several of these queries rely on a join producing duplicates, and a rewrite that quietly makes it a semi-join returns fewer rows than the original."
-}

@@ -1,10 +1,10 @@
 """Candidate generation, driven by a scripted model so no provider is needed."""
 
-from sqlrewriter import prompts
-from sqlrewriter.catalog import from_mapping
-from sqlrewriter.dialects import get_dialect
-from sqlrewriter.llm import ChatModel, Reply
-from sqlrewriter.rewrite import Rewriter
+from _03_catalog import from_mapping
+from _02_dialects import get_dialect
+from _06_llm import ChatModel, Reply
+from _10_rewrite import Rewriter
+import _07_prompts as prompts
 
 DIALECT = get_dialect("duckdb")
 CATALOG = from_mapping(
@@ -150,7 +150,7 @@ def test_a_generation_failure_becomes_a_candidate_with_a_reason():
             self.calls = 0
 
         def _once(self, *a, **k):
-            from sqlrewriter.llm import ModelError
+            from _06_llm import ModelError
             self.calls += 1
             if self.calls == 1:
                 return Reply("the plan", "", "m", "high")

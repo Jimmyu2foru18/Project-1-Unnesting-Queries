@@ -1,7 +1,16 @@
 """Workload loading, including the annotation comment trap."""
+
+import sys
 import pytest
 
-from sqlrewriter import workloads
+from _12_workloads import Workload, discover, load, parse_sql
+
+workloads = sys.modules[__name__]
+workloads.parse_sql = parse_sql
+workloads.load = load
+workloads.discover = discover
+workloads.Workload = Workload
+
 
 SIMPLE = """-- Workload: demo
 -- a free comment line before anything
@@ -142,9 +151,9 @@ def test_the_bundled_workloads_all_parse():
 
 
 def test_every_bundled_query_only_uses_tables_in_its_own_schema():
-    from sqlrewriter.catalog import tables_in
+    from _03_catalog import tables_in
 
     known = {"movies", "ratings", "people", "stars", "directors"}
     for workload in workloads.discover("workloads"):
         for query in workload:
-            assert tables_in(query.sql, "postgres") <= known, (workload.name, query.qid)
+            assert tables_in(query.sql, "duckdb") <= known, (workload.name, query.qid)

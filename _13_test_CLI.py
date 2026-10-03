@@ -1,11 +1,12 @@
 """The command line, run against a real DuckDB file."""
+
 import json
 
 import duckdb
 import pytest
 
-from sqlrewriter import cli
-from sqlrewriter.workloads import parse_sql
+from _12_workloads import parse_sql
+import _13_cli as cli
 
 QUERIES = """-- C01: correlated average
 -- Description: movies rated above eight
@@ -159,7 +160,7 @@ def test_rewrite_reports_a_query_whose_generation_failed(dsn, workload, capsys):
         name = "broken"
 
         def chat(self, *a, **k):
-            from sqlrewriter.llm import ModelError
+            from _06_llm import ModelError
             raise ModelError("no answer")
 
     import sqlrewriter.cli as module
@@ -186,7 +187,7 @@ def test_an_empty_workload_is_refused(dsn, tmp_path, capsys):
 
 
 def test_rewrites_are_rendered_in_the_workload_sql_shape():
-    from sqlrewriter.rank import Measurement, QueryReport
+    from _11_rank import Measurement, QueryReport
 
     report = QueryReport("C01", "rated above eight", "SELECT 1",
                          baseline=Measurement("original", "SELECT 1", median_ms=100.0),
@@ -194,19 +195,19 @@ def test_rewrites_are_rendered_in_the_workload_sql_shape():
     text = cli.render_rewrites([report])
     assert text.startswith("-- Verified rewrites")
     assert "-- C01 (rewrite): rated above eight" in text
-    assert "-- 20.0ms vs 100.0ms original" in text
+    assert "-- original: 100.0ms | rewritten: 20.0ms | speedup: 2.00x" in text
     assert text.rstrip().endswith("SELECT 2;")
 
 
 def test_a_failed_query_is_marked_rather_than_omitted():
-    from sqlrewriter.rank import QueryReport
+    from _11_rank import QueryReport
 
     text = cli.render_rewrites([QueryReport("C09", "d", "SELECT 1")])
     assert "-- C09 FAILED" in text
 
 
 def test_a_query_with_no_baseline_still_renders():
-    from sqlrewriter.rank import Measurement, QueryReport
+    from _11_rank import Measurement, QueryReport
 
     report = QueryReport("C01", "d", "SELECT 1", baseline=Measurement("original", "SELECT 1"),
                          candidates=[Measurement("plan", "SELECT 2", median_ms=5.0, equivalent=None)])
@@ -214,7 +215,7 @@ def test_a_query_with_no_baseline_still_renders():
 
 
 def test_a_rewrite_is_only_written_when_it_verified():
-    from sqlrewriter.rank import Measurement, QueryReport
+    from _11_rank import Measurement, QueryReport
 
     report = QueryReport("C01", "d", "SELECT 1",
                          baseline=Measurement("original", "SELECT 1", median_ms=1.0),

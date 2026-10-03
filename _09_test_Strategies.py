@@ -1,17 +1,19 @@
 """Prompting strategies."""
+
 import pytest
 
-from sqlrewriter.catalog import from_mapping
-from sqlrewriter.dialects import get_dialect
-from sqlrewriter.llm import ChatModel, Reply
-from sqlrewriter.rewrite import Rewriter
-from sqlrewriter.strategies import (
+from _03_catalog import from_mapping
+from _02_dialects import get_dialect
+from _06_llm import ChatModel, Reply
+from _10_rewrite import Rewriter
+from _09_strategies import (
     ExistingStrategy,
     OneShotStrategy,
     StructuredReasoningStrategy,
     ZeroShotStrategy,
     get_strategy,
 )
+import _13_cli as cli
 
 DIALECT = get_dialect("duckdb")
 CATALOG = from_mapping(
@@ -175,14 +177,12 @@ class TestStructuredReasoningStrategy:
 
 class TestStrategySelection:
     def test_cli_parser_accepts_all_strategies(self):
-        from sqlrewriter import cli
         parser = cli.build_parser()
         for name in ("existing", "zero-shot", "one-shot", "reasoning"):
             args = parser.parse_args(["rewrite", "--strategy", name])
             assert args.strategy == name
 
     def test_cli_compare_command_exists(self):
-        from sqlrewriter import cli
         parser = cli.build_parser()
         args = parser.parse_args(["compare", "a.json", "b.json"])
         assert args.command == "compare"

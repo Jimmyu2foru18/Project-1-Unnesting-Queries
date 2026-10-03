@@ -1,69 +1,48 @@
-"""Prompting strategies for SQL query rewriting.
+"""Prompting strategies for SQL query rewriting."""
 
-Each strategy controls the prompts sent to the model. Verification, timing,
-ranking, and reporting are strategy-agnostic.
-"""
-from __future__ import annotations
-
-from abc import ABC, abstractmethod
-
-from sqlrewriter import prompts
+from _07_prompts import CONTRACT, DIVERSITY, PLAN, REPAIR, VARIANTS, WRITE, system_for
 
 
-class PromptStrategy(ABC):
-    """Abstract base for prompting strategies."""
-
+class PromptStrategy:
     name: str = ""
 
-    @abstractmethod
     def system_prompt(self, hints: str = "") -> str:
-        """The system prompt, including any workload hints."""
         raise NotImplementedError
 
     def plan_prompt(self, schema: str, sql: str, dialect: str) -> str | None:
-        """Return a planning prompt, or ``None`` to skip the planning turn."""
         return None
 
-    @abstractmethod
     def write_prompt(self, schema: str, sql: str, dialect: str, plan: str = "") -> str:
-        """The prompt that asks the model to produce SQL."""
         raise NotImplementedError
 
     def variant_prompt(self, schema: str, sql: str, dialect: str, variant: str) -> str:
-        """The prompt for an alternative rewrite route."""
         return self.write_prompt(schema, sql, dialect, "")
 
-    @abstractmethod
     def repair_prompt(
         self, schema: str, sql: str, dialect: str, rejected: str, problems: list[str]
     ) -> str:
-        """The prompt that asks the model to fix a rejected rewrite."""
         raise NotImplementedError
 
 
 class ExistingStrategy(PromptStrategy):
-    """The original plan-then-write pipeline with repair."""
-
     name = "existing"
 
     def system_prompt(self, hints: str = "") -> str:
-        return prompts.system_for(hints)
+        return system_for(hints)
 
     def plan_prompt(self, schema: str, sql: str, dialect: str) -> str:
-        return prompts.PLAN.format(schema=schema, sql=sql, dialect=dialect)
+        return PLAN.format(schema=schema, sql=sql, dialect=dialect)
 
     def write_prompt(self, schema: str, sql: str, dialect: str, plan: str = "") -> str:
-        return prompts.WRITE.format(plan=plan, schema=schema, sql=sql, dialect=dialect)
+        return WRITE.format(plan=plan, schema=schema, sql=sql, dialect=dialect)
 
     def variant_prompt(self, schema: str, sql: str, dialect: str, variant: str) -> str:
-        return prompts.VARIANTS.format(
-            variant=variant, schema=schema, sql=sql, dialect=dialect
-        )
+        return VARIANTS.format(variant=variant, schema=schema, sql=sql, dialect=dialect)
 
     def repair_prompt(
         self, schema: str, sql: str, dialect: str, rejected: str, problems: list[str]
     ) -> str:
-        return prompts.REPAIR.format(
+        return REPAIR.format(
             problems="\n".join(f"- {p}" for p in problems),
             rejected=rejected,
             schema=schema,
@@ -73,12 +52,10 @@ class ExistingStrategy(PromptStrategy):
 
 
 class ZeroShotStrategy(PromptStrategy):
-    """A single direct rewrite request, no examples, no planning turn."""
-
     name = "zero-shot"
 
     def system_prompt(self, hints: str = "") -> str:
-        base = prompts.CONTRACT
+        base = CONTRACT
         if hints.strip():
             base += "\n" + hints.strip() + "\n"
         return base
@@ -108,8 +85,6 @@ class ZeroShotStrategy(PromptStrategy):
 
 
 class OneShotStrategy(PromptStrategy):
-    """One worked example followed by the target query."""
-
     name = "one-shot"
 
     EXAMPLE_INPUT = (
@@ -122,7 +97,7 @@ class OneShotStrategy(PromptStrategy):
     )
 
     def system_prompt(self, hints: str = "") -> str:
-        base = prompts.CONTRACT
+        base = CONTRACT
         if hints.strip():
             base += "\n" + hints.strip() + "\n"
         return base
@@ -157,17 +132,15 @@ class OneShotStrategy(PromptStrategy):
 
 
 class StructuredReasoningStrategy(PromptStrategy):
-    """Ask the model for a structured analysis block before the SQL."""
-
     name = "reasoning"
 
     def system_prompt(self, hints: str = "") -> str:
         base = (
-            prompts.CONTRACT
+            CONTRACT
             + "\n\n"
             + "When rewriting, always start your response with an ANALYSIS section "
-            "followed by a SQL section. Do not expose private chain-of-thought. "
-            "Keep the analysis concise and structured.\n"
+            + "followed by a SQL section. Do not expose private chain-of-thought. "
+            + "Keep the analysis concise and structured.\n"
         )
         if hints.strip():
             base += hints.strip() + "\n"
@@ -211,8 +184,7 @@ class StructuredReasoningStrategy(PromptStrategy):
         )
 
 
-def get_strategy(name: str) -> PromptStrategy:
-    """Build a strategy by name."""
+def get_strategy(name: str):
     normalised = name.strip().lower()
     registry = {
         ExistingStrategy.name: ExistingStrategy,
@@ -231,7 +203,6 @@ def get_strategy(name: str) -> PromptStrategy:
 __all__ = [
     "ExistingStrategy",
     "OneShotStrategy",
-    "PromptStrategy",
     "StructuredReasoningStrategy",
     "ZeroShotStrategy",
     "get_strategy",

@@ -1,47 +1,14 @@
-"""Checks a rewrite must pass before anything else happens to it.
+"""Checks a rewrite must pass before anything else happens to it."""
 
-These checks need no database and no model, and they are the reason a candidate
-is rejected long before it runs. Four things are checked:
-
-1. it parses, is one statement, and is read-only;
-2. it names only tables and columns that exist in the catalog;
-3. it is actually a rewrite: no correlation is left behind, and no joined
-   relation can fan out and duplicate rows;
-4. it has not quietly changed the question: DISTINCT, ORDER BY and the
-   anti-join shape are all preserved, and no indexed column has been wrapped in
-   something that defeats its index.
-
-Every one of them is deterministic. None of them asks the model whether it did
-a good job.
-"""
 from dataclasses import dataclass, field
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.optimizer.scope import traverse_scope
 
-from sqlrewriter.catalog import Catalog
-from sqlrewriter.dialects import Dialect
-
-
-@dataclass
-class Verdict:
-    """Whether a candidate may proceed, and why not."""
-
-    ok: bool = True
-    problems: list[str] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-
-    def fail(self, problem: str) -> None:
-        self.ok = False
-        self.problems.append(problem)
-
-    def note(self, note: str) -> None:
-        self.notes.append(note)
-
-    def absorb(self, problems: list[str]) -> None:
-        for problem in problems:
-            self.fail(problem)
+from _01_core import Verdict
+from _02_dialects import DuckDB
+from _03_catalog import Catalog
 
 
 def _single(sql: str, dialect: str) -> tuple[exp.Expression | None, list[str]]:
@@ -66,13 +33,7 @@ def _outer_sources(scope) -> set[str]:
 
 
 def correlated_columns(tree: exp.Expression) -> list[str]:
-    """Columns a subquery borrows from an enclosing query: real correlation.
-
-    A reference only counts when it names an outer alias. An unqualified column
-    is reported as unresolvable whenever the scope cannot see a schema, so
-    treating every such column as correlation would reject nearly every rewrite;
-    an alias-qualified reference to an enclosing scope is unambiguous.
-    """
+    """Columns a subquery borrows from an enclosing query: real correlation."""
     found = []
     for scope in traverse_scope(tree):
         if scope.parent is None:
@@ -96,12 +57,7 @@ def _group_keys(select: exp.Select) -> set[str]:
 
 
 def _projections(select: exp.Select) -> dict[str, str | None]:
-    """Output name to the grouped column it carries, or None if computed.
-
-    ``SELECT year AS y ... GROUP BY year`` outputs ``y`` but is grouped by
-    ``year``, so a join key has to be resolved through the select list before it
-    can be compared against the group by.
-    """
+    """Output name to the grouped column it carries, or None if computed."""
     out: dict[str, str | None] = {}
     for projection in select.expressions:
         inner = projection.this if isinstance(projection, exp.Alias) else projection
@@ -112,7 +68,7 @@ def _projections(select: exp.Select) -> dict[str, str | None]:
 
 
 def _single_source_key(select: exp.Select, wanted: set[str], catalog: Catalog) -> bool:
-    """Whether an ungrouped CTE is already unique on ``wanted``."""
+    """Whether an ungrouped CTE is already unique on wanted."""
     tables = list(select.find_all(exp.Table))
     if len(tables) != 1 or list(select.find_all(exp.Join)):
         return False
@@ -126,12 +82,7 @@ def _single_source_key(select: exp.Select, wanted: set[str], catalog: Catalog) -
 
 
 def fan_out_problems(tree: exp.Expression, catalog: Catalog) -> list[str]:
-    """Every relation feeding a join must yield at most one row per join key.
-
-    Only equalities from join conditions are treated as keys: an equality in a
-    WHERE clause compares the relation against something instead of multiplying
-    it, so it says nothing about fan-out.
-    """
+    """Every relation feeding a join must yield at most one row per join key."""
     ctes = {cte.alias_or_name: cte for cte in tree.find_all(exp.CTE)}
     if not ctes:
         return []
@@ -194,11 +145,11 @@ def _has_not_in(tree: exp.Expression) -> bool:
     return any(isinstance(node.parent, exp.Not) for node in tree.find_all(exp.In))
 
 
-def static_problems(sql: str, dialect: Dialect, catalog: Catalog) -> list[str]:
+def static_problems(sql: str, dialect: DuckDB, catalog: Catalog) -> list[str]:
     """Parses, is one read-only statement, and is grounded in the catalog."""
     try:
         dialect.check_statement(sql)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return [" ".join(str(err).split())[:200]]
 
     tree, problems = _single(sql, dialect.sqlglot)
@@ -219,13 +170,13 @@ def static_problems(sql: str, dialect: Dialect, catalog: Catalog) -> list[str]:
             tree.copy(), schema=catalog.columns, dialect=dialect.sqlglot,
             validate_qualify_columns=True,
         )
-    except Exception as err:  # noqa: BLE001 - sqlglot raises several optimizer errors
+    except Exception as err:
         return [f"{type(err).__name__}: {str(err).splitlines()[0]}"]
     return []
 
 
 def structural_problems(
-    sql: str, original_sql: str, dialect: Dialect, catalog: Catalog
+    sql: str, original_sql: str, dialect: DuckDB, catalog: Catalog
 ) -> list[str]:
     """The rewrite happened, and it did not change the question."""
     tree, problems = _single(sql, dialect.sqlglot)
@@ -257,7 +208,7 @@ def structural_problems(
     return problems
 
 
-def sargability_problems(sql: str, dialect: Dialect, catalog: Catalog) -> list[str]:
+def sargability_problems(sql: str, dialect: DuckDB, catalog: Catalog) -> list[str]:
     """A cast or function around an indexed column discards its index."""
     tree, problems = _single(sql, dialect.sqlglot)
     if tree is None:
@@ -280,7 +231,7 @@ def sargability_problems(sql: str, dialect: Dialect, catalog: Catalog) -> list[s
 
 
 def check(
-    candidate_sql: str, original_sql: str, dialect: Dialect, catalog: Catalog
+    candidate_sql: str, original_sql: str, dialect: DuckDB, catalog: Catalog
 ) -> Verdict:
     """Run every static gate, cheapest first."""
     verdict = Verdict()

@@ -1,13 +1,18 @@
 """Timing and ranking, measured against a real DuckDB database."""
+
 import json
 
 import duckdb
 import pytest
 
-from sqlrewriter import verify
-from sqlrewriter.catalog import from_mapping
-from sqlrewriter.dialects import get_dialect
-from sqlrewriter.rank import (
+from _08_verify import check as verify_check, Verdict as _Verdict
+
+class verify:
+    check = staticmethod(verify_check)
+    Verdict = _Verdict
+from _03_catalog import from_mapping
+from _02_dialects import get_dialect
+from _11_rank import (
     Measurement,
     check_equivalence,
     measure_query,
@@ -16,7 +21,7 @@ from sqlrewriter.rank import (
     time_statement,
     to_json,
 )
-from sqlrewriter.rewrite import Candidate, RewriteResult
+from _10_rewrite import Candidate, RewriteResult
 
 DIALECT = get_dialect("duckdb")
 CATALOG = from_mapping(
@@ -106,7 +111,7 @@ def test_the_baseline_and_the_candidate_are_both_measured(conn):
 
 def test_the_fastest_ranked_candidate_comes_first(conn):
     slower = candidate("SELECT m.title FROM movies m JOIN ratings r ON r.movie_id = m.id "
-                       "GROUP BY m.id, m.title, r.rating HAVING avg(r.rating) > 8.0", "wide-group")
+                      "GROUP BY m.id, m.title, r.rating HAVING avg(r.rating) > 8.0", "wide-group")
     report = measure_query(DIALECT, conn, result(candidate(FASTER, "join"), slower), CATALOG, runs=2)
     ranked = [m.label for m in report.ranked]
     assert ranked == sorted(ranked, key=lambda label: [m.median_ms for m in report.ranked if m.label == label][0])
@@ -147,7 +152,7 @@ class Stubbed(type(DIALECT)):
 
     def measure(self, conn, sql, runs):
         self.calls.append((sql, runs))
-        from sqlrewriter.dialects import Timing
+        from _02_dialects import Timing
         return Timing(float(self.timings.get(sql, 1.0)), runs)
 
 
