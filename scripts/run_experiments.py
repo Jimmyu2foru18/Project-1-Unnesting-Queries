@@ -1,18 +1,17 @@
-"""Run the experiments and record the results.
+"""Run experiments and record results.
 
-    python scripts/run_experiments.py                      # every workload on duckdb
+    python scripts/run_experiments.py
     python scripts/run_experiments.py --workload workloads/imdb_join --model ollama/gpt-oss:20b
     python scripts/run_experiments.py --engine postgres --dsn postgresql://...
 
-One run per workload, each writing a JSON report under ``benchmarks/results``.
-Each run is also appended to ``benchmarks/results/index.json`` with everything it
-depends on: the model, the engine, the schema, the settings and the sample that was
-built. A result that cannot be reproduced from its own record is not worth keeping.
+One run per workload, each writing a JSON report under benchmarks/results.
+Each run is also appended to benchmarks/results/index.json with the model,
+engine, schema, settings, and sample information. A result that cannot be
+reproduced from its own record is not worth keeping.
 """
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -32,11 +31,12 @@ def available_databases(name: str) -> bool:
 
 
 def run_one(args, workload, model: str) -> dict:
-    from sqlrewriter import rank, sampling, workloads as workload_mod
+    from sqlrewriter import rank, sampling
     from sqlrewriter.catalog import introspect
     from sqlrewriter.dialects import get_dialect
     from sqlrewriter.llm import parse_model
     from sqlrewriter.rewrite import Rewriter
+    from sqlrewriter.strategies import get_strategy
 
     dsn = args.dsn or workload.dsn
     dialect = get_dialect(args.engine)
@@ -72,6 +72,7 @@ def run_one(args, workload, model: str) -> dict:
 
     rewriter = Rewriter(
         parse_model(model), dialect, catalog,
+        get_strategy(args.strategy),
         variants=args.variants, attempts=args.attempts,
         schema_budget=args.schema_budget, hints=args.hints or workload.hints,
     )
@@ -98,6 +99,7 @@ def run_one(args, workload, model: str) -> dict:
         "workload": workload.name,
         "engine": args.engine,
         "model": model,
+        "strategy": args.strategy,
         "schema": schema,
         "queries": len(workload),
         "settings": {
@@ -132,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-sample", action="store_true")
     parser.add_argument("--hints", default="")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--strategy", default="existing", choices=["existing", "zero-shot", "one-shot", "reasoning"])
     args = parser.parse_args(argv)
 
     try:

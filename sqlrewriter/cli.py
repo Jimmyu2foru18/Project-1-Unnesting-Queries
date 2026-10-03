@@ -1,14 +1,14 @@
-"""The command line.
+"""The command line interface.
 
     python -m sqlrewriter show   --engine duckdb --dsn data/imdb.duckdb --schema main
     python -m sqlrewriter rewrite --engine postgres --dsn postgresql://... \\
                                  --model ollama/gpt-oss:20b --workload workloads/imdb_nested
-    python -m sqlrewriter rank    ... --out benchmarks/results/run.json
+    python -m sqlrewriter compare benchmarks/results/*.json
 
-``rewrite`` is the whole experiment: sample the data, generate candidates, check
-them against the sample, then time the survivors and rank them. ``show`` prints
-the schema block that would be sent to the model, which is the quickest way to
-check that introspection and pruning are behaving.
+``rewrite`` runs the full experiment: sample the data, generate candidates,
+check them against the sample, time the survivors, and rank them. ``show``
+prints the schema block sent to the model, which is the quickest way to check
+that introspection is working.
 """
 import argparse
 import json
@@ -20,9 +20,9 @@ from pathlib import Path
 from sqlrewriter import catalog as catalog_mod
 from sqlrewriter import rank, sampling, workloads
 from sqlrewriter.dialects import get_dialect
-from sqlrewriter.llm import available_models, parse_model
+from sqlrewriter.llm import parse_model
 from sqlrewriter.rewrite import Rewriter
-from sqlrewriter.verify import check
+from sqlrewriter.strategies import get_strategy
 
 DIR = Path(__file__).resolve().parent.parent
 
@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     connection_args(rewrite)
     rewrite.add_argument("--workload", default="workloads/imdb_nested")
     rewrite.add_argument("--model", default="ollama/gpt-oss:20b")
+    rewrite.add_argument("--strategy", default="existing", choices=["existing", "zero-shot", "one-shot", "reasoning"])
     rewrite.add_argument("--variants", type=int, default=3, help="candidates per query")
     rewrite.add_argument("--attempts", type=int, default=2, help="repair attempts per candidate")
     rewrite.add_argument("--schema-budget", type=int, default=8)
@@ -75,6 +76,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     catalog_cmd = sub.add_parser("catalog", help="dump the catalog as JSON")
     connection_args(catalog_cmd)
+
+    compare_cmd = sub.add_parser("compare", help="compare strategy results from JSON files")
+    compare_cmd.add_argument("files", nargs="+", help="JSON result files produced by rewrite")
     return parser
 
 
@@ -85,7 +89,7 @@ def _resolve_schema(args, dialect) -> str:
 def _connect(args):
     dialect = get_dialect(args.engine)
     if not args.dsn:
-        sys.exit(f"Error: no connection given; pass --dsn (for duckdb the default is ':memory:')")
+        sys.exit("Error: no connection given; pass --dsn (for duckdb the default is ':memory:')")
     conn = dialect.connect(args.dsn)
     return dialect, conn
 
@@ -167,7 +171,7 @@ def cmd_rewrite(args) -> int:
 
     conn = dialect.connect(dsn)
     cat = catalog_mod.introspect(dialect, conn, schema)
-    print(f"engine {dialect.name} | schema {schema} | {len(cat.columns)} tables | workload {workload.name}")
+    print(f"engine {dialect.name} | schema {schema} | {len(cat.columns)} tables | workload {workload.name} | strategy {args.strategy}")
 
     sample_schema = None
     if not args.no_sample:
@@ -184,8 +188,9 @@ def cmd_rewrite(args) -> int:
             sample_schema = stats.schema
 
     model = parse_model(args.model)
+    strategy = get_strategy(args.strategy)
     rewriter = Rewriter(
-        model, dialect, cat,
+        model, dialect, cat, strategy,
         variants=args.variants, attempts=args.attempts,
         schema_budget=args.schema_budget,
         hints=args.hints or workload.hints,
@@ -197,7 +202,7 @@ def cmd_rewrite(args) -> int:
         result = rewriter.rewrite(query.qid, query.description, query.sql)
         if result.error:
             print(f"  {result.error}")
-            reports.append(rank.QueryReport(query.qid, query.description, query.sql, error=result.error))
+            reports.append(rank.QueryReport(query.qid, query.description, query.sql, error=result.error, strategy=result.strategy))
             continue
         print(f"  {len(result.accepted)}/{len(result.candidates)} candidates passed the static gates")
         report = rank.measure_query(
@@ -245,11 +250,17 @@ def render_rewrites(reports) -> str:
     return "\n".join(line for line in lines if line is not None)
 
 
+def cmd_compare(args) -> int:
+    print(rank.compare_strategies(args.files))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handler = {
         "show": cmd_show, "catalog": cmd_catalog,
         "verify": cmd_verify, "rewrite": cmd_rewrite,
+        "compare": cmd_compare,
     }[args.command]
     return handler(args)
 

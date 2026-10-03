@@ -43,9 +43,11 @@ def workload(tmp_path):
 
 def test_the_parser_exposes_the_four_subcommands():
     parser = cli.build_parser()
-    for command in ("show", "catalog", "verify", "rewrite"):
+    for command in ("show", "catalog", "verify", "rewrite", "compare"):
         assert parser.parse_args([command] + (
-            ["--original", "a", "--candidate", "b"] if command == "verify" else []
+            ["--original", "a", "--candidate", "b"] if command == "verify" else (
+                ["a.json", "b.json"] if command == "compare" else []
+            )
         )).command == command
 
 

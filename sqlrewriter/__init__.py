@@ -1,4 +1,4 @@
-"""LLM-assisted SQL rewriting, verification and ranking across engines."""
+"""LLM-assisted SQL rewriting, verification, and ranking across engines."""
 from sqlrewriter.dialects import (  # noqa: F401
     Dialect,
     Plan,

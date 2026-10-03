@@ -1,17 +1,17 @@
 """Timing candidates and ranking them.
 
-Speed is wall-clock, median of several runs, because that is the only measure
-available on all three engines and it is what a user actually waits for. Plans
-are consulted afterwards for the two structural facts timing cannot show: a node
-that is rescanned, and a sequential scan of a large table that has an index.
+We use wall-clock time, median of several runs, because that is what a user
+actually waits for and it is available on all supported engines. Query plans
+are inspected afterwards for the two things timing cannot show: a node that is
+rescanned, and a sequential scan on a large table that has an index.
 
-The original is measured on the same connection with the same number of runs, so
-a speedup is always a like-for-like comparison. A candidate that is correct but
-slower than the original is kept and ranked last rather than dropped: on some
-queries the honest answer is that the database was already doing better.
+The original query is timed the same way on the same connection, so speedups
+are like-for-like. A correct rewrite that is slower than the original is kept
+and ranked last -- sometimes the database was already doing a good job.
 """
 import json
 import statistics
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,9 @@ class Measurement:
     error: str | None = None
     max_loops: int = 1
     seq_scans: list[str] = field(default_factory=list)
+    strategy: str = ""
+    generation_time_ms: float = 0.0
+    tokens: int = 0
 
     @property
     def ok(self) -> bool:
@@ -59,6 +62,7 @@ class QueryReport:
     candidates: list[Measurement] = field(default_factory=list)
     plan: str = ""
     error: str | None = None
+    strategy: str = ""
 
     @property
     def ranked(self) -> list[Measurement]:
@@ -72,10 +76,10 @@ class QueryReport:
 
 
 def time_statement(
-    dialect: Dialect, conn, sql: str, label: str, runs: int = 5
+    dialect: Dialect, conn, sql: str, label: str, runs: int = 5, strategy: str = ""
 ) -> Measurement:
     timing: Timing = dialect.measure(conn, sql, runs)
-    return Measurement(label, sql, timing.median_ms, timing.runs, error=timing.error)
+    return Measurement(label, sql, timing.median_ms, timing.runs, error=timing.error, strategy=strategy)
 
 
 def inspect_plan(dialect: Dialect, conn, sql: str, catalog: Catalog, measurement: Measurement) -> None:
@@ -131,22 +135,22 @@ def measure_query(
     more times, and its speedup is simply unknown. Zero or ``None`` means no
     budget, and the original is timed like any other statement.
     """
-    report = QueryReport(result.qid, result.description, result.original_sql, plan=result.plan)
+    report = QueryReport(result.qid, result.description, result.original_sql, plan=result.plan, strategy=result.strategy)
     if result.error:
         report.error = result.error
         return report
 
     budget = time_limit_ms if time_limit_ms and time_limit_ms > 0 else None
     if budget is None:
-        baseline = time_statement(dialect, conn, result.original_sql, "original", runs)
+        baseline = time_statement(dialect, conn, result.original_sql, "original", runs, strategy=result.strategy)
     else:
-        baseline = time_statement(dialect, conn, result.original_sql, "original", 1)
+        baseline = time_statement(dialect, conn, result.original_sql, "original", 1, strategy=result.strategy)
         if baseline.ok and baseline.median_ms >= budget:
             baseline.error = (
                 f"original takes {baseline.median_ms:.0f}ms, at or above the {budget:.0f}ms budget"
             )
         elif baseline.ok:
-            baseline = time_statement(dialect, conn, result.original_sql, "original", runs)
+            baseline = time_statement(dialect, conn, result.original_sql, "original", runs, strategy=result.strategy)
     report.baseline = baseline
 
     for candidate in result.accepted:
@@ -154,7 +158,7 @@ def measure_query(
             dialect, conn, candidate, result.original_sql,
             catalog=catalog, sample_schema=sample_schema, limit=compare_limit,
         )
-        measurement = time_statement(dialect, conn, candidate.sql, candidate.label, runs)
+        measurement = time_statement(dialect, conn, candidate.sql, candidate.label, runs, strategy=candidate.strategy)
         if outcome is not None:
             candidate.equivalence = outcome
             measurement.equivalent = outcome.equal
@@ -164,6 +168,8 @@ def measure_query(
             measurement.speedup = baseline.median_ms / measurement.median_ms if measurement.median_ms else None
         if measurement.ok:
             inspect_plan(dialect, conn, candidate.sql, catalog, measurement)
+        measurement.generation_time_ms = candidate.generation_time_ms
+        measurement.tokens = candidate.tokens
         report.candidates.append(measurement)
     return report
 
@@ -227,6 +233,7 @@ def to_json(reports: list[QueryReport]) -> str:
                 "description": r.description,
                 "original_sql": r.original_sql,
                 "plan": r.plan,
+                "strategy": r.strategy,
                 "baseline_ms": r.baseline.median_ms if r.baseline else None,
                 "baseline_error": r.baseline.error if r.baseline else None,
                 "candidates": [
@@ -239,6 +246,9 @@ def to_json(reports: list[QueryReport]) -> str:
                         "equivalent": m.equivalent,
                         "max_loops": m.max_loops,
                         "seq_scans": m.seq_scans,
+                        "strategy": m.strategy,
+                        "generation_time_ms": m.generation_time_ms,
+                        "tokens": m.tokens,
                         "error": m.error,
                     }
                     for m in r.candidates
@@ -255,3 +265,44 @@ def save_json(reports: list[QueryReport], path: str | Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(to_json(reports), encoding="utf-8")
     return target
+
+
+def compare_strategies(paths: list[str | Path]) -> str:
+    """Read multiple JSON result files and produce a strategy comparison table."""
+    buckets: dict[str, list[dict]] = defaultdict(list)
+    for path in paths:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        for q in payload["queries"]:
+            strat = q.get("strategy") or "unknown"
+            for c in q.get("candidates", []):
+                buckets[strat].append(c)
+
+    lines = [
+        (
+            f"{'Strategy':<14} {'Queries':>7} {'Valid':>6} {'Equiv':>6} "
+            f"{'Avg ms':>9} {'Median ms':>10} {'Avg speedup':>11} {'Median speedup':>14} {'Best speedup':>12} {'Avg gen ms':>11}"
+        )
+    ]
+    for strategy in sorted(buckets):
+        entries = buckets[strategy]
+        attempted = len({c.get("label") for c in entries})
+        valid = [c for c in entries if c.get("median_ms") is not None and not c.get("error")]
+        equiv = [c for c in valid if c.get("equivalent") is True]
+        medians = [c["median_ms"] for c in valid if c.get("median_ms") is not None]
+        speedups = [c["speedup"] for c in valid if c.get("speedup") is not None and c["speedup"] > 0]
+        gen_times = [c.get("generation_time_ms", 0.0) for c in valid if c.get("generation_time_ms") is not None]
+
+        avg_ms = round(statistics.mean(medians), 1) if medians else None
+        median_ms = round(statistics.median(medians), 1) if medians else None
+        avg_speedup = round(statistics.mean(speedups), 3) if speedups else None
+        median_speedup = round(statistics.median(speedups), 3) if speedups else None
+        best_speedup = round(max(speedups), 3) if speedups else None
+        avg_gen = round(statistics.mean(gen_times), 1) if gen_times else None
+
+        lines.append(
+            f"{strategy:<14} {attempted:>7} {len(valid):>6} {len(equiv):>6} "
+            f"{_ms(avg_ms):>9} {_ms(median_ms):>10} {_speed(avg_speedup):>11} "
+            f"{_speed(median_speedup):>14} {_speed(best_speedup):>12} {_ms(avg_gen):>11}"
+        )
+
+    return "\n".join(lines)

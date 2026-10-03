@@ -1,7 +1,7 @@
 """Checks a rewrite must pass before anything else happens to it.
 
-These gates need no database and no model, and they are the reason a candidate
-is refused long before it is run. Four things are checked:
+These checks need no database and no model, and they are the reason a candidate
+is rejected long before it runs. Four things are checked:
 
 1. it parses, is one statement, and is read-only;
 2. it names only tables and columns that exist in the catalog;
