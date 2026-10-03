@@ -1,0 +1,9 @@
+{
+  "name": "imdb_nested",
+  "engine": "duckdb",
+  "schema": "main",
+  "dsn": "data/imdb.duckdb",
+  "description": "Correlated subqueries, EXISTS/NOT EXISTS and IN against the IMDb schema.",
+  "tags": ["imdb", "correlated", "unnesting"],
+  "hints": "The workload is correlated subqueries. Removing the correlation is the whole point, and the pattern of each subquery decides the replacement.\n\nscalar correlated aggregate (AVG/MAX/MIN/SUM/COUNT): pre-aggregate in a CTE grouped by the correlation key, then equi-join on that key. An outer row whose key has no matching group must drop out, which is what the subquery's NULL already does. Do not add an outer join and do not substitute 0.\n\nEXISTS: join to a DISTINCT set of the correlation key. A semi-join, so no duplicates.\n\nNOT EXISTS: LEFT JOIN that DISTINCT set and keep rows where the key is NULL. An anti-join. Never rewrite NOT EXISTS as NOT IN.\n\nIN: join to a DISTINCT set of matching keys.\n\nNOT IN: use the anti-join above. If the source filters NULLs out of the subquery, keep that filter, because NOT IN is never true for a NULL.\n\ncount of peers beating a threshold: use COUNT(*) OVER (PARTITION BY key). Not DENSE_RANK: it counts distinct values, not rows.\n\nnested EXISTS: compose one semi-join per level, keeping the middle query's correlation key in the join condition.\n\nEvery CTE must yield at most one row per join key."
+}

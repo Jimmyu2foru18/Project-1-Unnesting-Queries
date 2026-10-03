@@ -1,3 +1,14 @@
-psycopg2-binary>=2.9
+# Core
+sqlglot>=25.0
 python-dotenv>=1.0
 pytest>=8.0
+
+# Engines. DuckDB is embedded and needs no server; the other two are only
+# imported when their engine is selected.
+duckdb>=1.0
+psycopg2-binary>=2.9
+pymysql>=1.1
+
+# Model providers. Only the ones you use are imported.
+openai>=1.40
+google-genai>=1.0

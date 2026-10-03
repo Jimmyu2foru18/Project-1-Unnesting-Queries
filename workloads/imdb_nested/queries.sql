@@ -1,13 +1,10 @@
--- Nested (correlated) query catalog for IMDb schema
--- Each query is annotated with a unique identifier (Q01, Q02, ...) and description.
--- These queries use correlated subqueries, EXISTS, NOT IN, IN, and aggregation
--- that reference outer query columns — making them candidates for unnesting.
+-- Workload: imdb_nested
+-- Correlated subqueries, EXISTS/NOT EXISTS and IN against the IMDb schema.
+-- Each query is annotated with an id (Q01, Q02, ...) and a description.
 --
--- IMPORTANT: Run these queries in the `imdb` database context.
--- The imdb.sql dump creates the tables in the `imdb` database.
--- Use: USE imdb;  or  mysql -D imdb -f nested_queries.sql
-
-USE imdb;
+-- Tables: movies(id, title, year), ratings(movie_id, rating, votes),
+--         people(id, name, birth), stars(movie_id, person_id),
+--         directors(movie_id, person_id)
 
 -- =====================================================================
 -- Q01: Movies rated above their year's average rating
