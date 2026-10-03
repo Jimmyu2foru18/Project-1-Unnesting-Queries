@@ -219,8 +219,17 @@ def from_rows(topics: dict[str, list[tuple]], schema: str = "public", engine: st
     return catalog
 
 
+CATALOG_ROW_LIMIT = 100_000
+
+
 def introspect(dialect, conn, schema: str, exact_counts: bool = False) -> Catalog:
-    catalog = from_rows(dialect.catalog_queries(schema), schema, engine=dialect.name)
+    topics: dict[str, list[tuple]] = {}
+    for name, sql in dialect.catalog_queries(schema).items():
+        try:
+            topics[name] = list(dialect.fetch(conn, sql, CATALOG_ROW_LIMIT).rows)
+        except Exception:
+            topics[name] = []
+    catalog = from_rows(topics, schema, engine=dialect.name)
     if exact_counts:
         for table in [t for t in catalog.columns if t not in catalog.rows]:
             quoted = dialect.ref(schema, table)

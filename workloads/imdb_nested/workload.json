@@ -1,0 +1,8 @@
+{
+  "name": "imdb_nested",
+  "engine": "duckdb",
+  "schema": "main",
+  "dsn": "imdb.duckdb",
+  "hints": "prefer pre-aggregation in a CTE over a correlated subquery",
+  "tags": ["nested", "subquery", "imdb"]
+}

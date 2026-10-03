@@ -141,7 +141,7 @@ def test_correlation_detection_ignores_merely_unqualified_columns(dialect):
 def test_check_stops_at_the_first_failing_gate(dialect):
     verdict = check("SELECT 1 FROM nowhere", CORRELATED, dialect, CATALOG)
     assert not verdict.ok
-    assert verdict.problems == ["table 'nowhere' does not exist"]
+    assert verdict.problems == ("table 'nowhere' does not exist",)
 
 
 def test_check_reports_a_pass(dialect):

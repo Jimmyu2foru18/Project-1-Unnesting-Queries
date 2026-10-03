@@ -60,6 +60,10 @@ class BaseEngine:
     def check_statement(self, sql: str) -> None:
         _check_statement(sql, self.sqlglot)
 
+    def execute(self, conn: Any, sql: str) -> None:
+        """Run one statement that returns no rows. Used for schema setup."""
+        conn.cursor().execute(sql)
+
     def close(self, conn: Any) -> None:
         conn.close()
 
@@ -78,9 +82,9 @@ class BaseEngine:
                 self._run_query(conn, sql, limit)
             except Exception as err:
                 return Timing(error=_message(err))
-            if i:
+            if i or runs == 1:
                 samples.append((time.perf_counter() - start) * 1000.0)
-        return Timing(statistics.median(samples or [0.0]), len(samples) + 1)
+        return Timing(statistics.median(samples or [0.0]), runs)
 
 
 class Postgres(BaseEngine):
@@ -92,6 +96,12 @@ class Postgres(BaseEngine):
     def connect(self, dsn: str, read_only: bool = False):
         import psycopg2
         return psycopg2.connect(dsn)
+
+    def commit(self, conn) -> None:
+        conn.commit()
+
+    def rollback(self, conn) -> None:
+        conn.rollback()
 
     def _run_query(self, conn, sql, limit):
         cur = conn.cursor()
@@ -150,6 +160,12 @@ class MySQL(BaseEngine):
             user=unquote(parsed.username or "root"), password=unquote(parsed.password or ""),
             database=(parsed.path or "/").lstrip("/") or None, **opts,
         )
+
+    def commit(self, conn) -> None:
+        conn.commit()
+
+    def rollback(self, conn) -> None:
+        conn.rollback()
 
     def _run_query(self, conn, sql, limit):
         cur = conn.cursor()

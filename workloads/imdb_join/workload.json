@@ -1,0 +1,8 @@
+{
+  "name": "imdb_join",
+  "engine": "duckdb",
+  "schema": "main",
+  "dsn": "imdb.duckdb",
+  "hints": "aggregate the large relation before joining it, and filter it in its own subquery first",
+  "tags": ["joins", "aggregation", "imdb"]
+}

@@ -163,16 +163,15 @@ def test_rewrite_reports_a_query_whose_generation_failed(dsn, workload, capsys):
             from _06_llm import ModelError
             raise ModelError("no answer")
 
-    import sqlrewriter.cli as module
-    original = module.parse_model
-    module.parse_model = lambda spec: Broken()
+    original = cli.parse_model
+    cli.parse_model = lambda spec: Broken()
     try:
         cli.main([
             "rewrite", "--engine", "duckdb", "--dsn", dsn, "--schema", "main",
             "--workload", str(workload), "--variants", "1", "--no-sample", "--no-write",
         ])
     finally:
-        module.parse_model = original
+        cli.parse_model = original
     assert "planning failed" in capsys.readouterr().out
 
 
@@ -194,8 +193,8 @@ def test_rewrites_are_rendered_in_the_workload_sql_shape():
                          candidates=[Measurement("plan", "SELECT 2", median_ms=20.0, equivalent=True)])
     text = cli.render_rewrites([report])
     assert text.startswith("-- Verified rewrites")
-    assert "-- C01 (rewrite): rated above eight" in text
-    assert "-- original: 100.0ms | rewritten: 20.0ms | speedup: 2.00x" in text
+    assert "-- C01: rated above eight" in text
+    assert "-- original: 100.0ms | rewritten: 20.0ms | speedup: 5.00x" in text
     assert text.rstrip().endswith("SELECT 2;")
 
 

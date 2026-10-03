@@ -90,7 +90,8 @@ class Rewriter:
         prompt = self.strategy.plan_prompt(self.schema_block(original_sql), original_sql, self.dialect.name)
         if prompt is None:
             return Reply("", "", self.model.name, self.plan_effort)
-        return self.model.chat(self.system, prompt, effort=self.plan_effort, budget=8192)
+        return self.model.chat(self.system, prompt, effort=self.plan_effort, budget=8192,
+                               require_sql=False)
 
     def emit(self, original_sql: str, plan: str, variant: str = "") -> Reply:
         schema = self.schema_block(original_sql)

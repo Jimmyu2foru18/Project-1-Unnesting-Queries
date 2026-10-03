@@ -12,7 +12,7 @@ from _04_sampling import build_sample, SAMPLE_SCHEMA
 from _06_llm import parse_model
 from _09_strategies import get_strategy
 from _10_rewrite import Rewriter
-from _11_rank import compare_strategies, measure_query, render_table, save_json
+from _11_rank import QueryReport, compare_strategies, measure_query, render_table, save_json
 from _12_workloads import load as load_workload, discover
 
 DIR = Path(__file__).resolve().parent
@@ -87,6 +87,7 @@ def _connect(args):
 
 
 def cmd_show(args) -> int:
+    dialect = get_dialect(args.engine)
     if args.dump:
         cat = from_dump(args.dump)
         schema = args.schema or cat.schema
@@ -238,8 +239,11 @@ def render_rewrites(reports) -> str:
         elif best is None:
             lines.append(f"-- {report.qid} FAILED: no candidates")
         else:
-            if base:
-                lines.append(f"-- original: {base:,.1f}ms | rewritten: {best.median_ms:,.1f}ms | speedup: {best.speedup:.2f}x")
+            speedup = best.speedup
+            if speedup is None and base and best.median_ms:
+                speedup = base / best.median_ms
+            if base and speedup:
+                lines.append(f"-- original: {base:,.1f}ms | rewritten: {best.median_ms:,.1f}ms | speedup: {speedup:.2f}x")
             lines.append(best.sql + ";")
         lines.append("")
     return "\n".join(line for line in lines if line is not None)

@@ -234,12 +234,13 @@ def check(
     candidate_sql: str, original_sql: str, dialect: DuckDB, catalog: Catalog
 ) -> Verdict:
     """Run every static gate, cheapest first."""
-    verdict = Verdict()
-    verdict.absorb(static_problems(candidate_sql, dialect, catalog))
+    verdict = Verdict().absorb(static_problems(candidate_sql, dialect, catalog))
     if not verdict.ok:
         return verdict
-    verdict.absorb(structural_problems(candidate_sql, original_sql, dialect, catalog))
-    verdict.absorb(sargability_problems(candidate_sql, dialect, catalog))
+    verdict = verdict.absorb(
+        structural_problems(candidate_sql, original_sql, dialect, catalog)
+    )
+    verdict = verdict.absorb(sargability_problems(candidate_sql, dialect, catalog))
     if verdict.ok:
-        verdict.note("static and structural gates passed")
+        verdict = verdict.note("static and structural gates passed")
     return verdict

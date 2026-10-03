@@ -135,7 +135,8 @@ def test_a_model_that_fails_to_plan_is_reported_not_raised():
         name = "broken"
 
         def _once(self, *a, **k):
-            raise __import__("sqlrewriter.llm", fromlist=["ModelError"]).ModelError("no answer")
+            from _06_llm import ModelError
+            raise ModelError("no answer")
 
     result = Rewriter(Broken(), DIALECT, CATALOG).rewrite("Q01", "d", ORIGINAL)
     assert not result.ok

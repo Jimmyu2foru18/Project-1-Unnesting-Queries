@@ -41,11 +41,15 @@ class ChatModel:
     name = ""
 
     def chat(self, system: str, user: str, *, effort: str = DEFAULT_EFFORT,
-             temperature: float = 0.0, budget: int = 4096) -> Reply:
-        """Return the final answer, downshifting effort while the answer is empty."""
+             temperature: float = 0.0, budget: int = 4096, require_sql: bool = True) -> Reply:
+        """Return the final answer, downshifting effort while the answer is empty.
+
+        With require_sql=False a turn that only reasons is a success, which is what
+        the plan-then-write strategy asks for on its first turn.
+        """
         for level in ladder(effort):
             reply = self._once(system, user, level, temperature, budget)
-            if reply.sql:
+            if reply.sql or not require_sql:
                 return reply
         raise ModelError(f"{self.name} returned no answer in the final channel at any effort")
 

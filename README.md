@@ -31,7 +31,6 @@ You can compare how the LLM is prompted to rewrite queries:
 
 ```bash
 pip install -r requirements.txt
-python scripts/setup.py --check
 ```
 
 Needs Python 3.11+.
@@ -39,7 +38,7 @@ Needs Python 3.11+.
 ## Configure
 
 ```bash
-python scripts/configure_keys.py
+python configure_keys.py --interactive
 ```
 
 For Ollama, no API key is needed. Set `SQLRW_DSN` for your database.
@@ -47,25 +46,25 @@ For Ollama, no API key is needed. Set `SQLRW_DSN` for your database.
 ## Load sample data
 
 ```bash
-python scripts/load_data.py --dump imdb.7z --engine duckdb --out data/imdb.duckdb --rebuild
+python load_data.py --dump imdb.7z --engine duckdb --out imdb.duckdb --rebuild
 ```
 
 ## Run
 
 ```bash
 # See what schema info gets sent to the model
-python -m sqlrewriter show --dsn data/imdb.duckdb --schema main
+python _13_cli.py show --dsn imdb.duckdb --schema main
 
 # Rewrite a workload
-python -m sqlrewriter rewrite \
-    --dsn data/imdb.duckdb --schema main \
+python _13_cli.py rewrite \
+    --dsn imdb.duckdb --schema main \
     --workload workloads/imdb_nested \
     --model ollama/gpt-oss:20b \
     --strategy zero-shot \
     --out results.json
 
 # Compare strategy results
-python -m sqlrewriter compare results/*.json
+python _13_cli.py compare results/*.json
 ```
 
 ## Commands
@@ -93,7 +92,7 @@ WHERE (SELECT avg(r.rating) FROM ratings r WHERE r.movie_id = m.id) > 8.0;
 {
   "name": "imdb_nested",
   "schema": "main",
-  "dsn": "data/imdb.duckdb",
+  "dsn": "imdb.duckdb",
   "hints": "prefer pre-aggregation over a correlated subquery"
 }
 ```
